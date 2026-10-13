@@ -1,0 +1,116 @@
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+
+from config_tab import ConfigTab
+from home_tab import HomeTab
+from request_types import RequestType
+from sidebar import Sidebar
+from tab import Tab
+
+WINDOW_TITLE: str = "ServiceNow Developer Panel"
+WINDOW_WIDTH: int = 1280
+WINDOW_HEIGHT: int = 820
+
+
+class MainWindow(QMainWindow):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle(WINDOW_TITLE)
+        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.sidebar: Sidebar = Sidebar()
+        self.home_tab: HomeTab = HomeTab("Home")
+        self.config_tab: ConfigTab = ConfigTab("Configuration")
+        self.response_tabs: list[ResponseTab] = []
+        self._current_page: Tab | None = None
+        self._request_page: Tab | None = None
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        self._content: QWidget = QWidget()
+        self._content_layout: QVBoxLayout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.sidebar)
+        layout.addWidget(self._content, 1)
+        self.setCentralWidget(container)
+
+        self.sidebar.pageSelected.connect(self._on_page_selected)
+        self.sidebar.pageClosed.connect(self.remove_response_page)
+        self.home_tab.requestSelected.connect(self.open_new_request_page)
+        self.config_tab.settingsSaved.connect(self.apply_settings)
+
+        self.sidebar.add_fixed_page(self.home_tab)
+        self.sidebar.add_fixed_page(self.config_tab)
+        self.sidebar.select_page(self.home_tab)
+
+    def open_new_request_page(self, request_type: RequestType) -> None:
+        self._discard_request_page()
+        print("opening request page")
+        self._display(Tab("new tab"))
+
+    def close_request_page(self) -> None:
+        self._discard_request_page()
+        self._display_sidebar_page()
+
+    def add_response_page(self, page: ResponseTab) -> None:
+        self.response_tabs.append(page)
+        self.sidebar.add_response_page(page)
+        self.sidebar.select_page(page)
+
+    def remove_response_page(self, page: Tab) -> None:
+        if not isinstance(page, ResponseTab):
+            return
+        self.sidebar.remove_page(page)
+        self.response_tabs.remove(page)
+        self._detach(page)
+        page.deleteLater()
+        if self._current_page is None:
+            self._display_sidebar_page()
+
+    def apply_settings(self, settings: InstanceSettings) -> None:
+        print("apply_settings")
+
+    def _on_page_selected(self, page: Tab) -> None:
+        self._discard_request_page()
+        self._display(page)
+
+    def _display_sidebar_page(self) -> None:
+        self._display(self.sidebar.current_page() or self.home_tab)
+
+    def _display(self, page: Tab) -> None:
+        if self._current_page is page:
+            return
+        if self._current_page is not None:
+            self._detach(self._current_page)
+        self._current_page = page
+        self._content_layout.addWidget(page)
+        page.show()
+
+    def _detach(self, page: Tab) -> None:
+        if self._current_page is page:
+            self._current_page = None
+        self._content_layout.removeWidget(page)
+        page.setParent(None)
+
+    def _discard_request_page(self) -> None:
+        request_page = self._request_page
+        self._request_page = None
+        if request_page is None:
+            return
+        request_page.cancel()
+        self._detach(request_page)
+        request_page.deleteLater()
+
+
+def main() -> None:
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    app.exec()
+
+
+if __name__ == "__main__":
+    main()
