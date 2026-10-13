@@ -35,3 +35,11 @@ The database is also used for response caching: whenever you send a request to a
 
 Any push call to the instance will clear your local cache for that instance.
 
+
+# Code stuff
+
+This project is written entirely in Python. 
+I use pyside6 for the UI and the mcp package to create the MCP server.
+The list of packages needed to build this application is in the requirement.txt file.
+
+There are two simple scritps to build the application, either for linux or windows, with a single command.
