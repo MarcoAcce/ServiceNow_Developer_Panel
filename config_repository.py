@@ -2,7 +2,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from authentication_types import AuthenticationType, authentication_type_of_key
-from database_manager import DatabaseManager
+from database_manager import DEFAULT_THEME_KEY, THEME_SETTING, DatabaseManager
 from secret_store import SecretError, decode_details, encode_details
 
 INSTANCE_QUERY: str = "SELECT id, name, address FROM instance ORDER BY name COLLATE NOCASE"
@@ -13,6 +13,11 @@ AUTHENTICATION_QUERY: str = (
 ACTIVE_AUTHENTICATION_QUERY: str = (
     "SELECT id, instance_id, authentication_type, authentication_details, active "
     "FROM authentication WHERE instance_id = ? AND active = 1"
+)
+CONFIGURATION_QUERY: str = "SELECT value FROM local_configuration WHERE name = ?"
+CONFIGURATION_UPSERT: str = (
+    "INSERT INTO local_configuration (name, value) VALUES (?, ?) "
+    "ON CONFLICT (name) DO UPDATE SET value = excluded.value"
 )
 
 
@@ -55,6 +60,22 @@ class ConfigRepository:
     def active_authentication(self, instance_id: int) -> Authentication | None:
         row = self._database.query_one(ACTIVE_AUTHENTICATION_QUERY, (instance_id,))
         return self._build_authentication(row) if row is not None else None
+
+    def configuration_value(self, name: str, default: str = "") -> str:
+        row = self._database.query_one(CONFIGURATION_QUERY, (name,))
+        return str(row["value"]) if row is not None else default
+
+    def set_configuration_value(self, name: str, value: str) -> None:
+        def operation(connection: sqlite3.Connection) -> None:
+            connection.execute(CONFIGURATION_UPSERT, (name, value))
+
+        self._database.write_and_wait(operation)
+
+    def theme_key(self) -> str:
+        return self.configuration_value(THEME_SETTING, DEFAULT_THEME_KEY)
+
+    def set_theme_key(self, key: str) -> None:
+        self.set_configuration_value(THEME_SETTING, key)
 
     def create_instance(self, name: str, address: str) -> int:
         def operation(connection: sqlite3.Connection) -> int:

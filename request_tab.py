@@ -17,7 +17,15 @@ from request_types import ANY_VALUE, RequestType
 from response_tab import ResponseTab
 from service import RequestCall, RequestError, RequestResult, RequestService, RequestSpec
 from tab import Tab
-from ui_widgets import hint_label, horizontal_rule, section_label, title_label, vertical_spacer
+from ui_widgets import (
+    hint_label,
+    horizontal_rule,
+    primary_button,
+    section_label,
+    show_status,
+    title_label,
+    vertical_spacer,
+)
 
 DEFAULT_LIMIT: int = 50
 MAXIMUM_LIMIT: int = 10000
@@ -45,7 +53,7 @@ class RequestTab(Tab):
         self.limit_field: QSpinBox = QSpinBox()
         self.status_label: QLabel = QLabel()
         self.close_button: QPushButton = QPushButton("Close")
-        self.execute_button: QPushButton = QPushButton("Execute")
+        self.execute_button: QPushButton = primary_button("Execute")
         self._build_ui()
         self._show_idle_status()
 
@@ -148,7 +156,6 @@ class RequestTab(Tab):
         self.execute_button.setDefault(True)
         self.execute_button.clicked.connect(self.execute)
         self.close_button.clicked.connect(self._on_close_clicked)
-        self.status_label.setEnabled(False)
         footer.addWidget(self.status_label, 1)
         footer.addWidget(self.close_button)
         footer.addWidget(self.execute_button)
@@ -162,8 +169,7 @@ class RequestTab(Tab):
         if self.is_running():
             return
         self.execute_button.setEnabled(False)
-        self.status_label.setEnabled(False)
-        self.status_label.setText(RUNNING_MESSAGE)
+        show_status(self.status_label, RUNNING_MESSAGE)
         self._call = self._service.send(self.build_request())
         self._call.succeeded.connect(self._on_succeeded)
         self._call.failed.connect(self._on_failed)
@@ -208,18 +214,19 @@ class RequestTab(Tab):
         return ""
 
     def _show_idle_status(self) -> None:
-        self.status_label.setEnabled(False)
-        self.status_label.setText(IDLE_MESSAGE.format(source=self._service.describe()))
+        show_status(self.status_label, IDLE_MESSAGE.format(source=self._service.describe()))
 
     def _on_succeeded(self, result: RequestResult) -> None:
         self._release_call()
-        self.status_label.setText(RESULT_MESSAGE.format(count=len(result.records), elapsed=result.elapsed_ms))
+        show_status(
+            self.status_label,
+            RESULT_MESSAGE.format(count=len(result.records), elapsed=result.elapsed_ms),
+        )
         self.executed.emit(self.create_response_tab(result))
 
     def _on_failed(self, error: RequestError) -> None:
         self._release_call()
-        self.status_label.setEnabled(True)
-        self.status_label.setText(ERROR_MESSAGE.format(message=error.message))
+        show_status(self.status_label, ERROR_MESSAGE.format(message=error.message), failed=True)
 
     def _release_call(self) -> None:
         self.execute_button.setEnabled(True)

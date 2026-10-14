@@ -3,6 +3,8 @@ import sqlite3
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,12 +21,24 @@ from config_repository import Authentication, ConfigRepository, Instance
 from database_manager import DatabaseError
 from secret_store import SecretError
 from tab import Tab
-from ui_widgets import hint_label, horizontal_rule, section_label, title_label, vertical_spacer
+from theme import THEMES
+from ui_widgets import (
+    as_card,
+    as_row,
+    danger_button,
+    hint_label,
+    horizontal_rule,
+    primary_button,
+    section_label,
+    title_label,
+    vertical_spacer,
+)
 
 CONFIG_HINT: str = (
     "Configure the instances you want to query and the authentication methods available for each "
     "of them. One method per instance can be active at a time."
 )
+THEME_LABEL: str = "Theme"
 ADD_INSTANCE_LABEL: str = "Add instance"
 ADD_AUTHENTICATION_LABEL: str = "Add authentication method"
 EXPAND_LABEL: str = "Expand"
@@ -44,6 +58,10 @@ DELETE_AUTHENTICATION_TITLE: str = "Delete authentication method"
 DELETE_AUTHENTICATION_MESSAGE: str = "Delete the {label} method of {name}?"
 DATABASE_ERROR_TITLE: str = "Configuration not saved"
 DUPLICATE_INSTANCE_MESSAGE: str = "An instance named {name} already exists."
+APPEARANCE_HINT: str = (
+    "The selected theme is stored in the local database and reused on the next start."
+)
+THEME_FIELD_WIDTH: int = 220
 CARD_SPACING: int = 6
 
 
@@ -60,7 +78,7 @@ class AuthenticationRow(QFrame):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        as_row(self)
         layout = QHBoxLayout(self)
         layout.addWidget(section_label(type_label(self.authentication.authentication_type)))
         layout.addWidget(self._build_details_label(), 1)
@@ -72,7 +90,7 @@ class AuthenticationRow(QFrame):
         edit_button.setEnabled(self.authentication.readable)
         edit_button.clicked.connect(lambda: self.editRequested.emit(self.authentication))
         layout.addWidget(edit_button)
-        delete_button = QPushButton(DELETE_LABEL)
+        delete_button = danger_button(DELETE_LABEL)
         delete_button.clicked.connect(lambda: self.deleteRequested.emit(self.authentication))
         layout.addWidget(delete_button)
 
@@ -119,7 +137,7 @@ class InstanceCard(QFrame):
         self._body_layout.addWidget(add_button)
 
     def _build_ui(self) -> None:
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        as_card(self)
         root = QVBoxLayout(self)
         root.setSpacing(CARD_SPACING)
         root.addLayout(self._build_header())
@@ -133,7 +151,7 @@ class InstanceCard(QFrame):
         header.addWidget(hint_label(self.instance.address), 1)
         self._toggle_button.clicked.connect(self._on_toggle_clicked)
         header.addWidget(self._toggle_button)
-        delete_button = QPushButton(DELETE_LABEL)
+        delete_button = danger_button(DELETE_LABEL)
         delete_button.clicked.connect(lambda: self.deleteRequested.emit(self.instance))
         header.addWidget(delete_button)
         return header
@@ -155,11 +173,13 @@ class InstanceCard(QFrame):
 class ConfigTab(Tab):
 
     configurationChanged = Signal()
+    themeChanged = Signal(str)
 
     def __init__(self, title: str, repository: ConfigRepository) -> None:
         super().__init__(title)
         self._repository: ConfigRepository = repository
         self._expanded_instance_id: int | None = None
+        self.theme_field: QComboBox = QComboBox()
         self._build_ui()
         self.reload()
 
@@ -177,8 +197,11 @@ class ConfigTab(Tab):
         root = QVBoxLayout(self)
         root.addWidget(title_label("Configuration"))
         root.addWidget(hint_label(CONFIG_HINT))
-        root.addLayout(self._build_toolbar())
         root.addWidget(horizontal_rule())
+        root.addWidget(section_label("Appearance"))
+        root.addLayout(self._build_appearance())
+        root.addWidget(horizontal_rule())
+        root.addLayout(self._build_toolbar())
 
         content = QWidget()
         self._instances_layout: QVBoxLayout = QVBoxLayout(content)
@@ -189,11 +212,24 @@ class ConfigTab(Tab):
         scroll.setWidget(content)
         root.addWidget(scroll)
 
+    def _build_appearance(self) -> QFormLayout:
+        layout = QFormLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.theme_field.setFixedWidth(THEME_FIELD_WIDTH)
+        for theme in THEMES:
+            self.theme_field.addItem(theme.label, theme.key)
+        index = self.theme_field.findData(self._repository.theme_key())
+        self.theme_field.setCurrentIndex(max(index, 0))
+        self.theme_field.currentIndexChanged.connect(self._on_theme_selected)
+        layout.addRow(THEME_LABEL, self.theme_field)
+        layout.addRow(hint_label(APPEARANCE_HINT))
+        return layout
+
     def _build_toolbar(self) -> QHBoxLayout:
         toolbar = QHBoxLayout()
         toolbar.addWidget(section_label("Instances"))
         toolbar.addStretch(1)
-        add_button = QPushButton(ADD_INSTANCE_LABEL)
+        add_button = primary_button(ADD_INSTANCE_LABEL)
         add_button.clicked.connect(self._on_add_instance)
         toolbar.addWidget(add_button)
         return toolbar
@@ -211,6 +247,17 @@ class ConfigTab(Tab):
         card.authenticationEditRequested.connect(self._on_edit_authentication)
         card.authenticationDeleteRequested.connect(self._on_delete_authentication)
         return card
+
+    def _on_theme_selected(self, index: int) -> None:
+        key = self.theme_field.itemData(index)
+        if not isinstance(key, str):
+            return
+        try:
+            self._repository.set_theme_key(key)
+        except (sqlite3.Error, DatabaseError) as error:
+            self._show_database_error(error)
+            return
+        self.themeChanged.emit(key)
 
     def _on_expand(self, instance: Instance) -> None:
         self._expanded_instance_id = instance.id
