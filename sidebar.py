@@ -26,6 +26,9 @@ class Sidebar(QListWidget):
         self.insertItem(self._fixed_count, self._build_item(tab))
         self._fixed_count += 1
 
+    def add_config_page(self, tab: Tab) -> None:
+        self.addItem(self._build_item(tab))
+
     def add_response_page(self, tab: Tab) -> None:
         self.insertItem(self._fixed_count, self._build_item(tab))
         tab.menuTitleChanged.connect(self._on_menu_title_changed)
