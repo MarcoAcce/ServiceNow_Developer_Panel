@@ -33,11 +33,21 @@ class Role(StrEnum):
     PRIMARY = "primary"
     DANGER = "danger"
     MONOSPACE = "monospace"
+    ICON_BUTTON = "icon_button"
+    ITEM_TITLE = "item_title"
+    ITEM_TITLE_SELECTED = "item_title_selected"
+    ITEM_HINT = "item_hint"
+    ITEM_HINT_SELECTED = "item_hint_selected"
 
 BORDER_RADIUS: int = 4
 CARD_RADIUS: int = 6
 CONTROL_HEIGHT: int = 28
 SCROLLBAR_WIDTH: int = 10
+ITEM_PADDING_VERTICAL: int = 10
+ITEM_PADDING_HORIZONTAL: int = 12
+ITEM_MARGIN_VERTICAL: int = 2
+ITEM_MARGIN_HORIZONTAL: int = 4
+ITEM_EXTRA_HEIGHT: int = 2 * (ITEM_PADDING_VERTICAL + ITEM_MARGIN_VERTICAL)
 TITLEBAR_HEIGHT: int = 38
 TITLEBAR_BUTTON_WIDTH: int = 46
 TITLEBAR_POINT_SIZE_DELTA: int = 1
@@ -135,6 +145,11 @@ THEMES: tuple[Theme, ...] = (LIGHT_THEME, DARK_THEME)
 DEFAULT_THEME: Theme = LIGHT_THEME
 
 _fonts_loaded: bool = False
+_current_theme: Theme = DEFAULT_THEME
+
+
+def current_theme() -> Theme:
+    return _current_theme
 
 
 def theme_of_key(key: str) -> Theme:
@@ -186,6 +201,8 @@ def build_font(application: QApplication) -> QFont:
 
 
 def apply_theme(application: QApplication, theme: Theme) -> None:
+    global _current_theme
+    _current_theme = theme
     load_fonts()
     application.setFont(build_font(application))
     application.setPalette(build_palette(theme))
@@ -291,6 +308,20 @@ QLabel[{ROLE_PROPERTY}="{Role.HINT}"] {{
 QLabel[{ROLE_PROPERTY}="{Role.ERROR}"] {{
     color: {rgb(theme.danger)};
 }}
+QLabel[{ROLE_PROPERTY}="{Role.ITEM_TITLE}"] {{
+    color: {rgb(theme.text_primary)};
+    font-size: {sidebar_point_size}pt;
+}}
+QLabel[{ROLE_PROPERTY}="{Role.ITEM_TITLE_SELECTED}"] {{
+    color: {rgb(theme.text_on_accent)};
+    font-size: {sidebar_point_size}pt;
+}}
+QLabel[{ROLE_PROPERTY}="{Role.ITEM_HINT}"] {{
+    color: {rgb(theme.text_secondary)};
+}}
+QLabel[{ROLE_PROPERTY}="{Role.ITEM_HINT_SELECTED}"] {{
+    color: {rgb(theme.text_on_accent)};
+}}
 QFrame[{ROLE_PROPERTY}="{Role.RULE}"] {{
     background-color: {rgb(theme.divider)};
     border: none;
@@ -378,6 +409,22 @@ QPushButton[{ROLE_PROPERTY}="{Role.DANGER}"]:hover {{
     background-color: {rgb(theme.danger)};
     color: {rgb(theme.text_on_accent)};
     border-color: {rgb(theme.danger)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.ICON_BUTTON}"] {{
+    background-color: transparent;
+    border: none;
+    border-radius: {BORDER_RADIUS}px;
+    padding: 0px;
+    min-height: 0px;
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.ICON_BUTTON}"]:hover {{
+    background-color: {rgb(theme.surface_hover)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.ICON_BUTTON}"]:pressed {{
+    background-color: {rgb(theme.accent_subtle)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.ICON_BUTTON}"]:disabled {{
+    background-color: transparent;
 }}
 QPushButton[{ROLE_PROPERTY}="{Role.DANGER}"]:pressed {{
     background-color: {rgb(theme.danger_pressed)};
@@ -468,8 +515,8 @@ QListWidget {{
 QListWidget::item {{
     color: {rgb(theme.text_primary)};
     font-size: {sidebar_point_size}pt;
-    padding: 10px 12px;
-    margin: 2px 4px;
+    padding: {ITEM_PADDING_VERTICAL}px {ITEM_PADDING_HORIZONTAL}px;
+    margin: {ITEM_MARGIN_VERTICAL}px {ITEM_MARGIN_HORIZONTAL}px;
     border-radius: {BORDER_RADIUS}px;
 }}
 QListWidget::item:hover {{

@@ -46,6 +46,18 @@ The font files in `fonts/` are the unmodified Google Fonts releases of Lato Regu
 Italic and Bold Italic. The license text is packaged alongside them in the built
 application, as the SIL Open Font License requires.
 
+### Material Design icons
+
+- License: Apache-2.0
+- Copyright: Google LLC
+- Homepage: https://fonts.google.com/icons
+- Source: https://github.com/google/material-design-icons
+- License text: https://www.apache.org/licenses/LICENSE-2.0
+
+The home, settings, refresh and delete glyphs drawn in the sidebar and in the response tabs
+are the unmodified 24dp outlines of the Material Design icon set, embedded as SVG path data
+in `icons.py` and recoloured at runtime to follow the selected theme.
+
 ### cryptography
 
 - Version: 50.0.2

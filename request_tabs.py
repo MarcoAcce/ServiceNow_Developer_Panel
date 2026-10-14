@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit
 
+from config_repository import ConfigRepository
 from filter_fields import RadioChoiceField
 from query_builder import OPERATOR_CONTAINS, OPERATOR_IS, build_condition
 from request_tab import TABLE_PLACEHOLDER, RequestTab, required_label, required_message
@@ -64,8 +65,8 @@ ACL_FIELD_REQUIRED: str = required_message(ACL_FIELD_LABEL)
 
 class TableRecordsRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(TABLE_RECORDS, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(TABLE_RECORDS, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("number", "short_description", "sys_created_on", "sys_updated_on", "sys_id")
@@ -80,8 +81,8 @@ class TableRecordsRequestTab(RequestTab):
 
 class DictionaryRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(TABLE_DICTIONARY, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(TABLE_DICTIONARY, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("element", "column_label", "internal_type", "max_length", "mandatory", "reference")
@@ -97,8 +98,8 @@ class DictionaryRequestTab(RequestTab):
 
 class AclRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(ACL_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(ACL_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "operation", "admin_overrides", "active", "description", "script")
@@ -175,8 +176,8 @@ class AclRequestTab(RequestTab):
 
 class ClientScriptRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(CLIENT_SCRIPT_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(CLIENT_SCRIPT_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "table", "type", "field_name", "ui_type", "active", "script")
@@ -194,8 +195,8 @@ class ClientScriptRequestTab(RequestTab):
 
 class BusinessRuleRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(BUSINESS_RULE_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(BUSINESS_RULE_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "collection", "when", "order", "action", "active", "script")
@@ -212,8 +213,8 @@ class BusinessRuleRequestTab(RequestTab):
 
 class ScriptIncludeRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(SCRIPT_INCLUDE_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(SCRIPT_INCLUDE_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "api_name", "client_callable", "access", "active", "script")
@@ -235,8 +236,8 @@ class ScriptIncludeRequestTab(RequestTab):
 
 class DataPolicyRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(DATA_POLICY_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(DATA_POLICY_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("short_description", "model_table", "active", "reverse_if_false", "enforce_ui", "apply_import_set")
@@ -257,8 +258,8 @@ class DataPolicyRequestTab(RequestTab):
 
 class UiPolicyRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(UI_POLICY_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(UI_POLICY_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("short_description", "table", "active", "on_load", "reverse_if_false", "order", "script_true")
@@ -275,8 +276,8 @@ class UiPolicyRequestTab(RequestTab):
 
 class UiActionRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService) -> None:
-        super().__init__(UI_ACTION_LIST, service)
+    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
+        super().__init__(UI_ACTION_LIST, service, repository)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "table", "action_name", "client", "form_button", "list_banner_button", "order", "script")
@@ -305,5 +306,7 @@ REQUEST_TAB_CLASSES: dict[str, type[RequestTab]] = {
 }
 
 
-def create_request_tab(key: str, service: RequestService) -> RequestTab:
-    return REQUEST_TAB_CLASSES[key](service)
+def create_request_tab(
+    key: str, service: RequestService, repository: ConfigRepository
+) -> RequestTab:
+    return REQUEST_TAB_CLASSES[key](service, repository)

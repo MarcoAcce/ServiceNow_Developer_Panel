@@ -10,6 +10,11 @@ from PySide6.QtWidgets import (
 from theme import Role, refresh_role, set_role
 
 RULE_HEIGHT: int = 1
+ELLIPSIS: str = "..."
+
+
+def shorten_text(text: str, limit: int) -> str:
+    return text if len(text) <= limit else f"{text[:limit]}{ELLIPSIS}"
 
 
 def title_label(text: str, point_size_delta: int = 4) -> QLabel:
