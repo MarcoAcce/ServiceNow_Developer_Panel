@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import QFormLayout
+from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit
 
-from request_tab import RequestTab
+from filter_fields import RadioChoiceField
+from query_builder import OPERATOR_CONTAINS, OPERATOR_IS, build_condition
+from request_tab import TABLE_PLACEHOLDER, RequestTab, required_label, required_message
 from request_types import (
     ACL_LIST,
     BUSINESS_RULE_LIST,
@@ -25,6 +27,7 @@ from response_tabs import (
     UiPolicyResponseTab,
 )
 from service import RequestResult, RequestService
+from ui_widgets import hint_label
 
 ACTIVE_OPTIONS: tuple[str, ...] = ("true", "false")
 ACL_OPERATIONS: tuple[str, ...] = ("read", "write", "create", "delete", "report_on")
@@ -36,6 +39,28 @@ BUSINESS_RULE_ACTIONS: tuple[str, ...] = ("insert", "update", "delete", "query")
 SCRIPT_INCLUDE_ACCESS: tuple[str, ...] = ("public", "package_private")
 DICTIONARY_TYPES: tuple[str, ...] = ("string", "reference", "glide_date_time", "boolean", "integer", "journal_input")
 
+ACL_SCOPE_TABLE: str = "table"
+ACL_SCOPE_WILDCARD: str = "wildcard"
+ACL_SCOPE_FIELD: str = "field"
+ACL_SCOPES: tuple[tuple[str, str], ...] = (
+    (ACL_SCOPE_TABLE, "Table"),
+    (ACL_SCOPE_WILDCARD, "Wildcard"),
+    (ACL_SCOPE_FIELD, "Field"),
+)
+ACL_SCOPE_HINTS: dict[str, str] = {
+    ACL_SCOPE_TABLE: "Record level controls named after the table alone, for example incident.",
+    ACL_SCOPE_WILDCARD: "Controls covering every field of the table, for example incident.*.",
+    ACL_SCOPE_FIELD: "Controls covering a single field, for example incident.state.",
+}
+ACL_NAME_FIELD: str = "name"
+ACL_WILDCARD_SUFFIX: str = ".*"
+ACL_SCOPE_LABEL: str = "ACL protects"
+ACL_TABLE_LABEL: str = "Table protected by the ACL"
+ACL_FIELD_LABEL: str = "Field protected by the ACL"
+ACL_FIELD_PLACEHOLDER: str = "Field name, for example state"
+ACL_TABLE_REQUIRED: str = required_message(ACL_TABLE_LABEL)
+ACL_FIELD_REQUIRED: str = required_message(ACL_FIELD_LABEL)
+
 
 class TableRecordsRequestTab(RequestTab):
 
@@ -46,8 +71,8 @@ class TableRecordsRequestTab(RequestTab):
         return ("number", "short_description", "sys_created_on", "sys_updated_on", "sys_id")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("active", "Active", "true, false or empty")
-        self.add_text_filter("sys_created_onRELATIVEGE", "Created in the last", "for example javascript:gs.daysAgo(7)")
+        self.add_boolean_filter("active", "Active")
+        self.add_date_filter("sys_created_on", "Created on or after")
 
     def create_response_tab(self, result: RequestResult) -> ResponseTab:
         return TableRecordsResponseTab(result)
@@ -62,7 +87,7 @@ class DictionaryRequestTab(RequestTab):
         return ("element", "column_label", "internal_type", "max_length", "mandatory", "reference")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("name", "Table", "Table holding the fields")
+        self.add_required_text_filter("name", "Table holding the fields", TABLE_PLACEHOLDER)
         self.add_text_filter("element", "Field name", "Exact field name")
         self.add_choice_filter("internal_type", "Field type", DICTIONARY_TYPES)
 
@@ -79,14 +104,73 @@ class AclRequestTab(RequestTab):
         return ("name", "operation", "admin_overrides", "active", "description", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("nameSTARTSWITH", "Table", "Table protected by the ACL")
-        self.add_text_filter("nameCONTAINS", "Field", "Field name, for empty record level ACL")
+        self.scope_field: RadioChoiceField = RadioChoiceField(ACL_SCOPES)
+        self.scope_hint: QLabel = hint_label("")
+        self.acl_table_field: QLineEdit = QLineEdit()
+        self.acl_field_field: QLineEdit = QLineEdit()
+        self.acl_table_field.setPlaceholderText(TABLE_PLACEHOLDER)
+        self.acl_table_field.setClearButtonEnabled(True)
+        self.acl_field_field.setPlaceholderText(ACL_FIELD_PLACEHOLDER)
+        self.acl_field_field.setClearButtonEnabled(True)
+        self.add_filter_row(ACL_SCOPE_LABEL, self.scope_field)
+        self.add_filter_row("", self.scope_hint)
+        self.add_filter_row(required_label(ACL_TABLE_LABEL), self.acl_table_field)
+        self.add_filter_row(required_label(ACL_FIELD_LABEL), self.acl_field_field)
         self.add_choice_filter("operation", "Operation", ACL_OPERATIONS)
         self.add_choice_filter("type", "Type", ACL_TYPES)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
+        self.scope_field.changed.connect(self._on_scope_changed)
+        self.acl_field_field.textChanged.connect(self.refresh_state)
+        self.require(self.acl_table_field, ACL_TABLE_REQUIRED)
+        self._apply_scope()
+
+    def scope(self) -> str:
+        return self.scope_field.value()
+
+    def protected_table(self) -> str:
+        return self.acl_table_field.text().strip()
+
+    def protected_field(self) -> str:
+        return self.acl_field_field.text().strip()
+
+    def acl_name(self) -> str:
+        table = self.protected_table()
+        if not table:
+            return ""
+        scope = self.scope()
+        if scope == ACL_SCOPE_WILDCARD:
+            return f"{table}{ACL_WILDCARD_SUFFIX}"
+        if scope == ACL_SCOPE_FIELD:
+            field = self.protected_field()
+            return f"{table}.{field}" if field else ""
+        return table
+
+    def missing_requirement(self) -> str:
+        missing = super().missing_requirement()
+        if missing:
+            return missing
+        if self.scope() == ACL_SCOPE_FIELD and not self.protected_field():
+            return ACL_FIELD_REQUIRED
+        return ""
+
+    def filter_conditions(self) -> list[str]:
+        conditions = super().filter_conditions()
+        name = self.acl_name()
+        if name:
+            conditions.insert(0, build_condition(ACL_NAME_FIELD, OPERATOR_IS, name))
+        return conditions
 
     def create_response_tab(self, result: RequestResult) -> ResponseTab:
         return AclResponseTab(result)
+
+    def _on_scope_changed(self) -> None:
+        self._apply_scope()
+        self.refresh_state()
+
+    def _apply_scope(self) -> None:
+        scope = self.scope()
+        self.set_filter_row_visible(self.acl_field_field, scope == ACL_SCOPE_FIELD)
+        self.scope_hint.setText(ACL_SCOPE_HINTS[scope])
 
 
 class ClientScriptRequestTab(RequestTab):
@@ -98,7 +182,7 @@ class ClientScriptRequestTab(RequestTab):
         return ("name", "table", "type", "field_name", "ui_type", "active", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("table", "Table", "Table the script runs on")
+        self.add_required_text_filter("table", "Table the script runs on", TABLE_PLACEHOLDER)
         self.add_choice_filter("type", "Script type", CLIENT_SCRIPT_TYPES)
         self.add_text_filter("field_name", "Field", "Only for onChange and onCellEdit scripts")
         self.add_choice_filter("ui_type", "UI type", CLIENT_SCRIPT_UI_TYPES)
@@ -117,7 +201,7 @@ class BusinessRuleRequestTab(RequestTab):
         return ("name", "collection", "when", "order", "action", "active", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("collection", "Table", "Table the rule runs on")
+        self.add_required_text_filter("collection", "Table the rule runs on", TABLE_PLACEHOLDER)
         self.add_choice_filter("when", "When", BUSINESS_RULE_WHEN)
         self.add_choice_filter("action", "Action", BUSINESS_RULE_ACTIONS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -135,7 +219,12 @@ class ScriptIncludeRequestTab(RequestTab):
         return ("name", "api_name", "client_callable", "access", "active", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("nameCONTAINS", "Name contains", "Part of the script include name")
+        self.add_text_filter(
+            "name",
+            "Name contains",
+            "Part of the script include name",
+            OPERATOR_CONTAINS,
+        )
         self.add_choice_filter("client_callable", "Client callable", ACTIVE_OPTIONS)
         self.add_choice_filter("access", "Access", SCRIPT_INCLUDE_ACCESS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -153,7 +242,11 @@ class DataPolicyRequestTab(RequestTab):
         return ("short_description", "model_table", "active", "reverse_if_false", "enforce_ui", "apply_import_set")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("model_table", "Table", "Table the policy applies to")
+        self.add_required_text_filter(
+            "model_table",
+            "Table the policy applies to",
+            TABLE_PLACEHOLDER,
+        )
         self.add_choice_filter("enforce_ui", "Enforced on the UI", ACTIVE_OPTIONS)
         self.add_choice_filter("apply_import_set", "Applied to import sets", ACTIVE_OPTIONS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -171,7 +264,7 @@ class UiPolicyRequestTab(RequestTab):
         return ("short_description", "table", "active", "on_load", "reverse_if_false", "order", "script_true")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("table", "Table", "Table the policy runs on")
+        self.add_required_text_filter("table", "Table the policy runs on", TABLE_PLACEHOLDER)
         self.add_choice_filter("on_load", "Runs on load", ACTIVE_OPTIONS)
         self.add_choice_filter("reverse_if_false", "Reverses if false", ACTIVE_OPTIONS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -189,7 +282,7 @@ class UiActionRequestTab(RequestTab):
         return ("name", "table", "action_name", "client", "form_button", "list_banner_button", "order", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_text_filter("table", "Table", "Table the action belongs to")
+        self.add_required_text_filter("table", "Table the action belongs to", TABLE_PLACEHOLDER)
         self.add_text_filter("action_name", "Action name", "Internal action name")
         self.add_choice_filter("client", "Client side", ACTIVE_OPTIONS)
         self.add_choice_filter("form_button", "Form button", ACTIVE_OPTIONS)
