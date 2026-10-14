@@ -1,10 +1,12 @@
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
+from sidebar import Sidebar
+from tab import Tab
 from config_tab import ConfigTab
 from home_tab import HomeTab
 from request_types import RequestType
-from sidebar import Sidebar
-from tab import Tab
+
+from response_tab import ResponseTab
 
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
@@ -23,6 +25,7 @@ class MainWindow(QMainWindow):
         self.response_tabs: list[ResponseTab] = []
         self._current_page: Tab | None = None
         self._request_page: Tab | None = None
+        self.response_tabs: list[ResponseTab] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
