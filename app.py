@@ -2,11 +2,12 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayou
 
 from sidebar import Sidebar
 from tab import Tab
+from config_repository import ConfigRepository
 from config_tab import ConfigTab
+from database_manager import DatabaseManager
 from home_tab import HomeTab
 
 from request_types import RequestType
-from request_tab import RequestTab
 from request_tabs import create_request_tab
 
 from response_tab import ResponseTab
@@ -21,17 +22,18 @@ WINDOW_HEIGHT: int = 820
 
 class MainWindow(QMainWindow):
 
-    def __init__(self) -> None:
+    def __init__(self, repository: ConfigRepository) -> None:
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.repository: ConfigRepository = repository
+        self.service: RequestService = DummyRequestService(self)
         self.sidebar: Sidebar = Sidebar()
         self.home_tab: HomeTab = HomeTab("Home")
-        self.config_tab: ConfigTab = ConfigTab("Configuration")
+        self.config_tab: ConfigTab = ConfigTab("Configuration", repository)
         self.response_tabs: list[ResponseTab] = []
         self._current_page: Tab | None = None
         self._request_page: Tab | None = None
-        self.response_tabs: list[ResponseTab] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -49,10 +51,9 @@ class MainWindow(QMainWindow):
         self.sidebar.pageSelected.connect(self._on_page_selected)
         self.sidebar.pageClosed.connect(self.remove_response_page)
         self.home_tab.requestSelected.connect(self.open_new_request_page)
-        self.config_tab.settingsSaved.connect(self.apply_settings)
 
         self.sidebar.add_fixed_page(self.home_tab)
-        self.sidebar.add_fixed_page(self.config_tab)
+        self.sidebar.add_config_page(self.config_tab)
         self.sidebar.select_page(self.home_tab)
 
     def open_new_request_page(self, request_type: RequestType) -> None:
@@ -81,9 +82,6 @@ class MainWindow(QMainWindow):
         page.deleteLater()
         if self._current_page is None:
             self._display_sidebar_page()
-
-    def apply_settings(self, settings: InstanceSettings) -> None:
-        print("apply_settings")
 
     def _on_page_selected(self, page: Tab) -> None:
         self._discard_request_page()
@@ -118,11 +116,14 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
-    app = QApplication([])
-    window = MainWindow()
-    window.service: RequestService = DummyRequestService(window)
-    window.show()
-    app.exec()
+    database = DatabaseManager.instance()
+    try:
+        app = QApplication([])
+        window = MainWindow(ConfigRepository(database))
+        window.show()
+        app.exec()
+    finally:
+        database.close()
 
 
 if __name__ == "__main__":
