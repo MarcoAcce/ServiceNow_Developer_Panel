@@ -15,6 +15,8 @@ from response_tab import ResponseTab
 from service import RequestService
 from dummy_service import DummyRequestService
 
+from theme import apply_theme, theme_of_key
+
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
 WINDOW_HEIGHT: int = 820
@@ -48,6 +50,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._content, 1)
         self.setCentralWidget(container)
 
+        self.config_tab.themeChanged.connect(self._on_theme_changed)
         self.sidebar.pageSelected.connect(self._on_page_selected)
         self.sidebar.pageClosed.connect(self.remove_response_page)
         self.home_tab.requestSelected.connect(self.open_new_request_page)
@@ -82,6 +85,11 @@ class MainWindow(QMainWindow):
         page.deleteLater()
         if self._current_page is None:
             self._display_sidebar_page()
+
+    def _on_theme_changed(self, key: str) -> None:
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            apply_theme(application, theme_of_key(key))
 
     def _on_page_selected(self, page: Tab) -> None:
         self._discard_request_page()
@@ -119,7 +127,9 @@ def main() -> None:
     database = DatabaseManager.instance()
     try:
         app = QApplication([])
-        window = MainWindow(ConfigRepository(database))
+        repository = ConfigRepository(database)
+        apply_theme(app, theme_of_key(repository.theme_key()))
+        window = MainWindow(repository)
         window.show()
         app.exec()
     finally:

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
 from tab import Tab
 
-SIDEBAR_WIDTH: int = 200
+SIDEBAR_WIDTH: int = 260
 TAB_ROLE: int = int(Qt.ItemDataRole.UserRole)
 
 

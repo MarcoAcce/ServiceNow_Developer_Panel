@@ -1,9 +1,8 @@
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout
 
 from service import RequestResult
 from response_tab import ResponseTab
-from ui_widgets import section_label
+from ui_widgets import script_view, section_label
 
 SCRIPT_PREVIEW_HEIGHT: int = 180
 EMPTY_SCRIPT_MESSAGE: str = "Select a row to read its script."
@@ -29,15 +28,11 @@ class ScriptResponseTab(ResponseTab):
     script_section_title: str = "Script"
 
     def __init__(self, result: RequestResult) -> None:
-        self.script_preview: QPlainTextEdit = QPlainTextEdit()
+        self.script_preview: QPlainTextEdit = script_view(EMPTY_SCRIPT_MESSAGE)
         super().__init__(result)
 
     def build_details(self, layout: QVBoxLayout) -> None:
-        self.script_preview.setReadOnly(True)
-        self.script_preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.script_preview.setFont(QFont("monospace"))
         self.script_preview.setFixedHeight(SCRIPT_PREVIEW_HEIGHT)
-        self.script_preview.setPlaceholderText(EMPTY_SCRIPT_MESSAGE)
         layout.addWidget(section_label(self.script_section_title))
         layout.addWidget(self.script_preview)
 

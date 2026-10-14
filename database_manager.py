@@ -9,7 +9,9 @@ from typing import Any
 
 from app_paths import database_path
 
-SCHEMA_VERSION: int = 1
+THEME_SETTING: str = "theme"
+DEFAULT_THEME_KEY: str = "light"
+SCHEMA_VERSION: int = 2
 STARTUP_TIMEOUT_SECONDS: float = 15.0
 WRITE_TIMEOUT_SECONDS: float = 15.0
 SHUTDOWN_TIMEOUT_SECONDS: float = 15.0
@@ -45,11 +47,25 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1))
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS local_configuration (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_authentication_instance ON authentication (instance_id)",
     """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_authentication_active
         ON authentication (instance_id) WHERE active = 1
     """,
+)
+
+SEED_STATEMENTS: tuple[tuple[str, tuple[object, ...]], ...] = (
+    (
+        "INSERT OR IGNORE INTO local_configuration (id, name, value) VALUES (1, ?, ?)",
+        (THEME_SETTING, DEFAULT_THEME_KEY),
+    ),
 )
 
 Operation = Callable[[sqlite3.Connection], Any]
@@ -180,6 +196,8 @@ class DatabaseManager:
         with connection:
             for statement in SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            for statement, parameters in SEED_STATEMENTS:
+                connection.execute(statement, parameters)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _read_connection(self) -> sqlite3.Connection:
