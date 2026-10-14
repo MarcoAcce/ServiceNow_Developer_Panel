@@ -5,6 +5,29 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from request_types import RequestType
 
+TABLE_API_PATH: str = "/api/now/table"
+
+
+class ServiceConfigurationError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class RequestSpec:
+    request_type: RequestType
+    table: str
+    parameters: dict[str, str]
+    columns: tuple[str, ...]
+
+    @property
+    def path(self) -> str:
+        return f"{TABLE_API_PATH}/{self.table}" if self.table else TABLE_API_PATH
+
+    @property
+    def query_string(self) -> str:
+        return "&".join(f"{name}={value}" for name, value in self.parameters.items())
+
+
 @dataclass(frozen=True)
 class RequestResult:
     request: RequestSpec
@@ -39,6 +62,12 @@ class RequestResult:
         return self.request.query_string
 
 
+@dataclass(frozen=True)
+class RequestError:
+    request: RequestSpec
+    message: str
+    status_code: int = 0
+
 
 class RequestCall(QObject):
 
@@ -54,6 +83,27 @@ class RequestCall(QObject):
 
     def cancel(self) -> None:
         raise NotImplementedError
+
+
+class FailedRequestCall(RequestCall):
+
+    def __init__(self, request: RequestSpec, message: str, parent: QObject | None = None) -> None:
+        super().__init__(request, parent)
+        self._error: RequestError = RequestError(request=request, message=message)
+        self._timer: QTimer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(0)
+        self._timer.timeout.connect(self._emit_error)
+        self._timer.start()
+
+    def is_running(self) -> bool:
+        return self._timer.isActive()
+
+    def cancel(self) -> None:
+        self._timer.stop()
+
+    def _emit_error(self) -> None:
+        self.failed.emit(self._error)
 
 
 class RequestService(QObject):
