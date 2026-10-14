@@ -5,6 +5,7 @@ from pathlib import Path
 APPLICATION_DIRECTORY_NAME: str = "ServiceNowDeveloperPanel"
 DATA_DIRECTORY_NAME: str = "data"
 DATABASE_FILE_NAME: str = "panel.store"
+FONTS_DIRECTORY_NAME: str = "fonts"
 WRITE_PROBE_NAME: str = ".write_probe"
 
 
@@ -16,6 +17,17 @@ def installation_directory() -> Path:
     if is_frozen():
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def resource_directory() -> Path:
+    bundle = getattr(sys, "_MEIPASS", "")
+    if is_frozen() and bundle:
+        return Path(bundle)
+    return Path(__file__).resolve().parent
+
+
+def fonts_directory() -> Path:
+    return resource_directory() / FONTS_DIRECTORY_NAME
 
 
 def fallback_data_directory() -> Path:
