@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
 from tab import Tab
 
-SIDEBAR_WIDTH: int = 200
+SIDEBAR_WIDTH: int = 260
 TAB_ROLE: int = int(Qt.ItemDataRole.UserRole)
 
 
@@ -25,6 +25,9 @@ class Sidebar(QListWidget):
     def add_fixed_page(self, tab: Tab) -> None:
         self.insertItem(self._fixed_count, self._build_item(tab))
         self._fixed_count += 1
+
+    def add_config_page(self, tab: Tab) -> None:
+        self.addItem(self._build_item(tab))
 
     def add_response_page(self, tab: Tab) -> None:
         self.insertItem(self._fixed_count, self._build_item(tab))

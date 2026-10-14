@@ -1,10 +1,21 @@
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
-from config_tab import ConfigTab
-from home_tab import HomeTab
-from request_types import RequestType
 from sidebar import Sidebar
 from tab import Tab
+from config_repository import ConfigRepository
+from config_tab import ConfigTab
+from database_manager import DatabaseManager
+from home_tab import HomeTab
+
+from request_types import RequestType
+from request_tabs import create_request_tab
+
+from response_tab import ResponseTab
+
+from service import RequestService
+from dummy_service import DummyRequestService
+
+from theme import apply_theme, theme_of_key
 
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
@@ -13,13 +24,15 @@ WINDOW_HEIGHT: int = 820
 
 class MainWindow(QMainWindow):
 
-    def __init__(self) -> None:
+    def __init__(self, repository: ConfigRepository) -> None:
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.repository: ConfigRepository = repository
+        self.service: RequestService = DummyRequestService(self)
         self.sidebar: Sidebar = Sidebar()
         self.home_tab: HomeTab = HomeTab("Home")
-        self.config_tab: ConfigTab = ConfigTab("Configuration")
+        self.config_tab: ConfigTab = ConfigTab("Configuration", repository)
         self.response_tabs: list[ResponseTab] = []
         self._current_page: Tab | None = None
         self._request_page: Tab | None = None
@@ -37,19 +50,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._content, 1)
         self.setCentralWidget(container)
 
+        self.config_tab.themeChanged.connect(self._on_theme_changed)
         self.sidebar.pageSelected.connect(self._on_page_selected)
         self.sidebar.pageClosed.connect(self.remove_response_page)
         self.home_tab.requestSelected.connect(self.open_new_request_page)
-        self.config_tab.settingsSaved.connect(self.apply_settings)
 
         self.sidebar.add_fixed_page(self.home_tab)
-        self.sidebar.add_fixed_page(self.config_tab)
+        self.sidebar.add_config_page(self.config_tab)
         self.sidebar.select_page(self.home_tab)
 
     def open_new_request_page(self, request_type: RequestType) -> None:
         self._discard_request_page()
-        print("opening request page")
-        self._display(Tab("new tab"))
+        request_page = create_request_tab(request_type.key, self.service)
+        request_page.executed.connect(self.add_response_page)
+        request_page.closed.connect(self.close_request_page)
+        self._request_page = request_page
+        self._display(request_page)
 
     def close_request_page(self) -> None:
         self._discard_request_page()
@@ -70,8 +86,10 @@ class MainWindow(QMainWindow):
         if self._current_page is None:
             self._display_sidebar_page()
 
-    def apply_settings(self, settings: InstanceSettings) -> None:
-        print("apply_settings")
+    def _on_theme_changed(self, key: str) -> None:
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            apply_theme(application, theme_of_key(key))
 
     def _on_page_selected(self, page: Tab) -> None:
         self._discard_request_page()
@@ -106,10 +124,16 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
-    app = QApplication([])
-    window = MainWindow()
-    window.show()
-    app.exec()
+    database = DatabaseManager.instance()
+    try:
+        app = QApplication([])
+        repository = ConfigRepository(database)
+        apply_theme(app, theme_of_key(repository.theme_key()))
+        window = MainWindow(repository)
+        window.show()
+        app.exec()
+    finally:
+        database.close()
 
 
 if __name__ == "__main__":
