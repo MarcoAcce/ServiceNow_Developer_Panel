@@ -4,9 +4,15 @@ from sidebar import Sidebar
 from tab import Tab
 from config_tab import ConfigTab
 from home_tab import HomeTab
+
 from request_types import RequestType
+from request_tab import RequestTab
+from request_tabs import create_request_tab
 
 from response_tab import ResponseTab
+
+from service import RequestService
+from dummy_service import DummyRequestService
 
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
@@ -51,8 +57,11 @@ class MainWindow(QMainWindow):
 
     def open_new_request_page(self, request_type: RequestType) -> None:
         self._discard_request_page()
-        print("opening request page")
-        self._display(Tab("new tab"))
+        request_page = create_request_tab(request_type.key, self.service)
+        request_page.executed.connect(self.add_response_page)
+        request_page.closed.connect(self.close_request_page)
+        self._request_page = request_page
+        self._display(request_page)
 
     def close_request_page(self) -> None:
         self._discard_request_page()
@@ -111,6 +120,7 @@ class MainWindow(QMainWindow):
 def main() -> None:
     app = QApplication([])
     window = MainWindow()
+    window.service: RequestService = DummyRequestService(window)
     window.show()
     app.exec()
 
