@@ -20,6 +20,10 @@ SIDEBAR_POINT_SIZE_DELTA: int = 2
 
 class Role(StrEnum):
     TITLE = "title"
+    WINDOW = "window"
+    TITLEBAR = "titlebar"
+    WINDOW_BUTTON = "window_button"
+    WINDOW_CLOSE = "window_close"
     SECTION = "section"
     HINT = "hint"
     ERROR = "error"
@@ -34,6 +38,9 @@ BORDER_RADIUS: int = 4
 CARD_RADIUS: int = 6
 CONTROL_HEIGHT: int = 28
 SCROLLBAR_WIDTH: int = 10
+TITLEBAR_HEIGHT: int = 38
+TITLEBAR_BUTTON_WIDTH: int = 46
+TITLEBAR_POINT_SIZE_DELTA: int = 1
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,10 @@ class Theme:
     row_alternate: Color
     header: Color
     focus: Color
+    titlebar: Color
+    titlebar_hover: Color
+    titlebar_text: Color
+    titlebar_border: Color
 
 
 LIGHT_THEME: Theme = Theme(
@@ -85,6 +96,10 @@ LIGHT_THEME: Theme = Theme(
     row_alternate=(247, 247, 248),
     header=(240, 241, 242),
     focus=(129, 131, 208),
+    titlebar=(31, 110, 84),
+    titlebar_hover=(43, 133, 102),
+    titlebar_text=(240, 248, 244),
+    titlebar_border=(14, 58, 44),
 )
 
 DARK_THEME: Theme = Theme(
@@ -110,6 +125,10 @@ DARK_THEME: Theme = Theme(
     row_alternate=(29, 30, 32),
     header=(41, 43, 46),
     focus=(159, 160, 219),
+    titlebar=(19, 80, 60),
+    titlebar_hover=(31, 110, 84),
+    titlebar_text=(226, 240, 234),
+    titlebar_border=(10, 44, 33),
 )
 
 THEMES: tuple[Theme, ...] = (LIGHT_THEME, DARK_THEME)
@@ -223,6 +242,40 @@ QWidget {{
 QMainWindow, QDialog, QMessageBox {{
     background-color: {rgb(theme.canvas)};
 }}
+QWidget[{ROLE_PROPERTY}="{Role.WINDOW}"] {{
+    background-color: {rgb(theme.canvas)};
+    border: 1px solid {rgb(theme.titlebar_border)};
+}}
+QWidget[{ROLE_PROPERTY}="{Role.TITLEBAR}"] {{
+    background-color: {rgb(theme.titlebar)};
+    border-bottom: 1px solid {rgb(theme.titlebar_border)};
+}}
+QWidget[{ROLE_PROPERTY}="{Role.TITLEBAR}"] QLabel {{
+    color: {rgb(theme.titlebar_text)};
+    background-color: transparent;
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.WINDOW_BUTTON}"],
+QPushButton[{ROLE_PROPERTY}="{Role.WINDOW_CLOSE}"] {{
+    background-color: transparent;
+    border: none;
+    border-radius: 0px;
+    padding: 0px;
+    min-width: {TITLEBAR_BUTTON_WIDTH}px;
+    max-width: {TITLEBAR_BUTTON_WIDTH}px;
+    min-height: {TITLEBAR_HEIGHT - 1}px;
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.WINDOW_BUTTON}"]:hover {{
+    background-color: {rgb(theme.titlebar_hover)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.WINDOW_BUTTON}"]:pressed {{
+    background-color: {rgb(theme.titlebar_border)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.WINDOW_CLOSE}"]:hover {{
+    background-color: {rgb(theme.danger)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.WINDOW_CLOSE}"]:pressed {{
+    background-color: {rgb(theme.danger_pressed)};
+}}
 QToolTip {{
     background-color: {rgb(theme.surface)};
     color: {rgb(theme.text_primary)};
@@ -312,6 +365,11 @@ QPushButton[{ROLE_PROPERTY}="{Role.PRIMARY}"]:pressed {{
     background-color: {rgb(theme.accent_pressed)};
     border-color: {rgb(theme.accent_pressed)};
 }}
+QPushButton[{ROLE_PROPERTY}="{Role.PRIMARY}"]:disabled {{
+    background-color: {rgb(theme.canvas)};
+    color: {rgb(theme.text_disabled)};
+    border-color: {rgb(theme.divider)};
+}}
 QPushButton[{ROLE_PROPERTY}="{Role.DANGER}"] {{
     color: {rgb(theme.danger)};
     border-color: {rgb(theme.danger)};
@@ -345,8 +403,10 @@ QLineEdit:read-only {{
     background-color: {rgb(theme.surface_hover)};
     color: {rgb(theme.text_secondary)};
 }}
-QPlainTextEdit[{ROLE_PROPERTY}="{Role.MONOSPACE}"] {{
+QPlainTextEdit[{ROLE_PROPERTY}="{Role.MONOSPACE}"],
+QLineEdit[{ROLE_PROPERTY}="{Role.MONOSPACE}"] {{
     background-color: {rgb(theme.surface_sunken)};
+    color: {rgb(theme.text_primary)};
     font-family: {MONOSPACE_FAMILIES};
 }}
 QComboBox QAbstractItemView {{
@@ -374,6 +434,28 @@ QCheckBox::indicator:checked {{
     border-color: {rgb(theme.accent)};
 }}
 QCheckBox::indicator:disabled {{
+    background-color: {rgb(theme.canvas)};
+    border-color: {rgb(theme.divider)};
+}}
+QRadioButton {{
+    background-color: transparent;
+    spacing: 6px;
+}}
+QRadioButton::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {rgb(theme.border)};
+    border-radius: 8px;
+    background-color: {rgb(theme.surface)};
+}}
+QRadioButton::indicator:hover {{
+    border-color: {rgb(theme.accent)};
+}}
+QRadioButton::indicator:checked {{
+    background-color: {rgb(theme.accent)};
+    border-color: {rgb(theme.accent)};
+}}
+QRadioButton::indicator:disabled {{
     background-color: {rgb(theme.canvas)};
     border-color: {rgb(theme.divider)};
 }}

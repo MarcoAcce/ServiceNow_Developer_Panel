@@ -1,5 +1,7 @@
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
+from app_paths import icon_path
 from sidebar import Sidebar
 from tab import Tab
 from config_repository import ConfigRepository
@@ -15,19 +17,23 @@ from response_tab import ResponseTab
 from service import RequestService
 from dummy_service import DummyRequestService
 
-from theme import apply_theme, theme_of_key
+from theme import Theme, apply_theme, theme_of_key
+from window_frame import FramelessWindow
 
+APPLICATION_NAME: str = "ServiceNow Developer Panel"
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
 WINDOW_HEIGHT: int = 820
 
 
-class MainWindow(QMainWindow):
+class MainWindow(FramelessWindow):
 
-    def __init__(self, repository: ConfigRepository) -> None:
+    def __init__(self, repository: ConfigRepository, theme: Theme) -> None:
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
+        self.setWindowIcon(QIcon(str(icon_path())))
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.apply_window_theme(theme)
         self.repository: ConfigRepository = repository
         self.service: RequestService = DummyRequestService(self)
         self.sidebar: Sidebar = Sidebar()
@@ -48,7 +54,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.sidebar)
         layout.addWidget(self._content, 1)
-        self.setCentralWidget(container)
+        self.set_body(container)
 
         self.config_tab.themeChanged.connect(self._on_theme_changed)
         self.sidebar.pageSelected.connect(self._on_page_selected)
@@ -87,9 +93,11 @@ class MainWindow(QMainWindow):
             self._display_sidebar_page()
 
     def _on_theme_changed(self, key: str) -> None:
+        theme = theme_of_key(key)
         application = QApplication.instance()
         if isinstance(application, QApplication):
-            apply_theme(application, theme_of_key(key))
+            apply_theme(application, theme)
+        self.apply_window_theme(theme)
 
     def _on_page_selected(self, page: Tab) -> None:
         self._discard_request_page()
@@ -127,9 +135,13 @@ def main() -> None:
     database = DatabaseManager.instance()
     try:
         app = QApplication([])
+        app.setApplicationName(APPLICATION_NAME)
+        app.setApplicationDisplayName(APPLICATION_NAME)
+        app.setWindowIcon(QIcon(str(icon_path())))
         repository = ConfigRepository(database)
-        apply_theme(app, theme_of_key(repository.theme_key()))
-        window = MainWindow(repository)
+        theme = theme_of_key(repository.theme_key())
+        apply_theme(app, theme)
+        window = MainWindow(repository, theme)
         window.show()
         app.exec()
     finally:
