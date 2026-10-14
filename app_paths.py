@@ -4,6 +4,7 @@ from pathlib import Path
 
 APPLICATION_DIRECTORY_NAME: str = "ServiceNowDeveloperPanel"
 DATA_DIRECTORY_NAME: str = "data"
+CACHE_DIRECTORY_NAME: str = "cache"
 DATABASE_FILE_NAME: str = "panel.store"
 FONTS_DIRECTORY_NAME: str = "fonts"
 ASSETS_DIRECTORY_NAME: str = "assets"
@@ -64,6 +65,16 @@ def data_directory() -> Path:
 
 def database_path() -> Path:
     return data_directory() / DATABASE_FILE_NAME
+
+
+def cache_directory() -> Path:
+    directory = data_directory() / CACHE_DIRECTORY_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def cache_path(cache_name: str) -> Path:
+    return cache_directory() / cache_name
 
 
 def _is_writable(directory: Path) -> bool:

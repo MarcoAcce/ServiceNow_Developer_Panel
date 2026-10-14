@@ -4,15 +4,20 @@ import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from app_paths import database_path
+from response_cache import cache_names, delete_cache
 
 THEME_SETTING: str = "theme"
 CURRENT_INSTANCE_SETTING: str = "current_instance"
+CACHE_LIFETIME_SETTING: str = "cache_lifetime_minutes"
 DEFAULT_THEME_KEY: str = "light"
-SCHEMA_VERSION: int = 2
+DEFAULT_CACHE_LIFETIME_MINUTES: int = 5
+RESPONSE_TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
+SCHEMA_VERSION: int = 3
 STARTUP_TIMEOUT_SECONDS: float = 15.0
 WRITE_TIMEOUT_SECONDS: float = 15.0
 SHUTDOWN_TIMEOUT_SECONDS: float = 15.0
@@ -55,7 +60,20 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         value TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS response (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_id INTEGER NOT NULL
+            REFERENCES instance (id) ON DELETE CASCADE ON UPDATE CASCADE,
+        request_type TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        request_details TEXT NOT NULL,
+        cache_name TEXT NOT NULL UNIQUE
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_authentication_instance ON authentication (instance_id)",
+    "CREATE INDEX IF NOT EXISTS idx_response_instance ON response (instance_id)",
+    "CREATE INDEX IF NOT EXISTS idx_response_received_at ON response (received_at)",
     """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_authentication_active
         ON authentication (instance_id) WHERE active = 1
@@ -67,7 +85,16 @@ SEED_STATEMENTS: tuple[tuple[str, tuple[object, ...]], ...] = (
         "INSERT OR IGNORE INTO local_configuration (id, name, value) VALUES (1, ?, ?)",
         (THEME_SETTING, DEFAULT_THEME_KEY),
     ),
+    (
+        "INSERT OR IGNORE INTO local_configuration (name, value) VALUES (?, ?)",
+        (CACHE_LIFETIME_SETTING, str(DEFAULT_CACHE_LIFETIME_MINUTES)),
+    ),
 )
+
+CONFIGURATION_VALUE_QUERY: str = "SELECT value FROM local_configuration WHERE name = ?"
+EXPIRED_RESPONSE_QUERY: str = "SELECT id, cache_name FROM response WHERE received_at <= ?"
+CACHE_NAME_QUERY: str = "SELECT cache_name FROM response"
+RESPONSE_DELETE: str = "DELETE FROM response WHERE id = ?"
 
 Operation = Callable[[sqlite3.Connection], Any]
 
@@ -145,6 +172,36 @@ class DatabaseManager:
 
     def query_one(self, statement: str, parameters: Sequence[Any] = ()) -> sqlite3.Row | None:
         return self._read_connection().execute(statement, parameters).fetchone()
+
+    def cache_lifetime_minutes(self) -> int:
+        row = self.query_one(CONFIGURATION_VALUE_QUERY, (CACHE_LIFETIME_SETTING,))
+        value = str(row["value"]).strip() if row is not None else ""
+        if value.isdigit() and int(value) > 0:
+            return int(value)
+        return DEFAULT_CACHE_LIFETIME_MINUTES
+
+    def purge_expired_responses(self) -> int:
+        cutoff = datetime.now() - timedelta(minutes=self.cache_lifetime_minutes())
+        expired = self.query(EXPIRED_RESPONSE_QUERY, (cutoff.strftime(RESPONSE_TIME_FORMAT),))
+        if not expired:
+            return 0
+        identifiers: list[tuple[int]] = []
+        for row in expired:
+            delete_cache(str(row["cache_name"]))
+            identifiers.append((int(row["id"]),))
+
+        def operation(connection: sqlite3.Connection) -> int:
+            connection.executemany(RESPONSE_DELETE, identifiers)
+            return len(identifiers)
+
+        return int(self.write_and_wait(operation))
+
+    def purge_orphan_caches(self) -> int:
+        known = {str(row["cache_name"]) for row in self.query(CACHE_NAME_QUERY)}
+        orphans = [name for name in cache_names() if name not in known]
+        for name in orphans:
+            delete_cache(name)
+        return len(orphans)
 
     def close(self) -> None:
         if not self._closed:
