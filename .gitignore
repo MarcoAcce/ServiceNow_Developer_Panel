@@ -1,3 +1,6 @@
 virtual_environment/
 __pycache__/
 data/
+build/
+dist/
+*.spec
