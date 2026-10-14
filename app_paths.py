@@ -6,6 +6,9 @@ APPLICATION_DIRECTORY_NAME: str = "ServiceNowDeveloperPanel"
 DATA_DIRECTORY_NAME: str = "data"
 DATABASE_FILE_NAME: str = "panel.store"
 FONTS_DIRECTORY_NAME: str = "fonts"
+ASSETS_DIRECTORY_NAME: str = "assets"
+ICON_FILE_NAME: str = "icon.ico"
+ICON_IMAGE_FILE_NAME: str = "icon.png"
 WRITE_PROBE_NAME: str = ".write_probe"
 
 
@@ -28,6 +31,18 @@ def resource_directory() -> Path:
 
 def fonts_directory() -> Path:
     return resource_directory() / FONTS_DIRECTORY_NAME
+
+
+def assets_directory() -> Path:
+    return resource_directory() / ASSETS_DIRECTORY_NAME
+
+
+def icon_path() -> Path:
+    return assets_directory() / ICON_FILE_NAME
+
+
+def icon_image_path() -> Path:
+    return assets_directory() / ICON_IMAGE_FILE_NAME
 
 
 def fallback_data_directory() -> Path:

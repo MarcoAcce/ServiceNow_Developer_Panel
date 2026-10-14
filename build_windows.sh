@@ -25,6 +25,8 @@ fi
     --windowed \
     --name "$APPLICATION_NAME" \
     --add-data "fonts;fonts" \
+    --add-data "assets;assets" \
+    --icon assets/icon.ico \
     app.py
 
 echo "Built dist/$APPLICATION_NAME.exe"
