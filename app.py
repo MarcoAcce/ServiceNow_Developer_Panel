@@ -2,6 +2,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
 from app_paths import icon_path
+from icons import refresh_icon_widgets
 from sidebar import Sidebar
 from tab import Tab
 from config_repository import ConfigRepository
@@ -10,11 +11,12 @@ from database_manager import DatabaseManager
 from home_tab import HomeTab
 
 from request_types import RequestType
+from request_tab import RequestTab
 from request_tabs import create_request_tab
 
 from response_tab import ResponseTab
 
-from service import RequestService
+from service import RequestCall, RequestError, RequestResult, RequestService
 from dummy_service import DummyRequestService
 
 from theme import Theme, apply_theme, theme_of_key
@@ -37,11 +39,14 @@ class MainWindow(FramelessWindow):
         self.repository: ConfigRepository = repository
         self.service: RequestService = DummyRequestService(self)
         self.sidebar: Sidebar = Sidebar()
-        self.home_tab: HomeTab = HomeTab("Home")
+        self.home_tab: HomeTab = HomeTab("Home", repository)
         self.config_tab: ConfigTab = ConfigTab("Configuration", repository)
         self.response_tabs: list[ResponseTab] = []
         self._current_page: Tab | None = None
         self._request_page: Tab | None = None
+        self._busy: bool = False
+        self._refresh_call: RequestCall | None = None
+        self._refresh_page: ResponseTab | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -57,8 +62,10 @@ class MainWindow(FramelessWindow):
         self.set_body(container)
 
         self.config_tab.themeChanged.connect(self._on_theme_changed)
+        self.config_tab.configurationChanged.connect(self._on_configuration_changed)
         self.sidebar.pageSelected.connect(self._on_page_selected)
         self.sidebar.pageClosed.connect(self.remove_response_page)
+        self.sidebar.pageRefreshed.connect(self.refresh_response_page)
         self.home_tab.requestSelected.connect(self.open_new_request_page)
 
         self.sidebar.add_fixed_page(self.home_tab)
@@ -67,9 +74,11 @@ class MainWindow(FramelessWindow):
 
     def open_new_request_page(self, request_type: RequestType) -> None:
         self._discard_request_page()
-        request_page = create_request_tab(request_type.key, self.service)
+        request_page = create_request_tab(request_type.key, self.service, self.repository)
+        request_page.set_instance_id(self.home_tab.current_instance_id())
         request_page.executed.connect(self.add_response_page)
         request_page.closed.connect(self.close_request_page)
+        request_page.runningChanged.connect(self._set_busy)
         self._request_page = request_page
         self._display(request_page)
 
@@ -78,13 +87,27 @@ class MainWindow(FramelessWindow):
         self._display_sidebar_page()
 
     def add_response_page(self, page: ResponseTab) -> None:
+        page.refreshRequested.connect(self.refresh_response_page)
+        page.set_refresh_enabled(not self._busy)
         self.response_tabs.append(page)
         self.sidebar.add_response_page(page)
         self.sidebar.select_page(page)
 
+    def refresh_response_page(self, page: Tab) -> None:
+        if self._busy or not isinstance(page, ResponseTab):
+            return
+        self._refresh_page = page
+        self._refresh_call = self.service.send(page.result.request)
+        self._refresh_call.succeeded.connect(self._on_refresh_succeeded)
+        self._refresh_call.failed.connect(self._on_refresh_failed)
+        page.set_refreshing(True)
+        self._set_busy(True)
+
     def remove_response_page(self, page: Tab) -> None:
         if not isinstance(page, ResponseTab):
             return
+        if page is self._refresh_page:
+            self._cancel_refresh()
         self.sidebar.remove_page(page)
         self.response_tabs.remove(page)
         self._detach(page)
@@ -97,7 +120,45 @@ class MainWindow(FramelessWindow):
         application = QApplication.instance()
         if isinstance(application, QApplication):
             apply_theme(application, theme)
+            refresh_icon_widgets(application)
+        self.sidebar.refresh_icons()
         self.apply_window_theme(theme)
+
+    def _on_configuration_changed(self) -> None:
+        self.home_tab.reload_instances()
+        request_page = self._request_page
+        if isinstance(request_page, RequestTab):
+            request_page.reload_instances()
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.sidebar.set_busy(busy)
+        for page in self.response_tabs:
+            page.set_refresh_enabled(not busy)
+
+    def _on_refresh_succeeded(self, result: RequestResult) -> None:
+        page = self._refresh_page
+        self._release_refresh()
+        if page is not None:
+            page.update_result(result)
+
+    def _on_refresh_failed(self, error: RequestError) -> None:
+        page = self._refresh_page
+        self._release_refresh()
+        if page is not None:
+            page.show_refresh_error(error.message)
+
+    def _cancel_refresh(self) -> None:
+        if self._refresh_call is not None:
+            self._refresh_call.cancel()
+        self._release_refresh()
+
+    def _release_refresh(self) -> None:
+        if self._refresh_call is not None:
+            self._refresh_call.deleteLater()
+            self._refresh_call = None
+        self._refresh_page = None
+        self._set_busy(False)
 
     def _on_page_selected(self, page: Tab) -> None:
         self._discard_request_page()
@@ -107,6 +168,8 @@ class MainWindow(FramelessWindow):
         self._display(self.sidebar.current_page() or self.home_tab)
 
     def _display(self, page: Tab) -> None:
+        if page is self.home_tab:
+            self.home_tab.reload_instances()
         if self._current_page is page:
             return
         if self._current_page is not None:

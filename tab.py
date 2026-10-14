@@ -19,5 +19,17 @@ class Tab(QWidget):
         self._menu_title = title
         self.menuTitleChanged.emit(self)
 
+    @property
+    def menu_table(self) -> str:
+        return ""
+
+    @property
+    def menu_detail(self) -> str:
+        return ""
+
+    @property
+    def menu_tooltip(self) -> str:
+        return self._menu_title
+
     def is_closable(self) -> bool:
         return False

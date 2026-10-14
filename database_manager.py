@@ -10,6 +10,7 @@ from typing import Any
 from app_paths import database_path
 
 THEME_SETTING: str = "theme"
+CURRENT_INSTANCE_SETTING: str = "current_instance"
 DEFAULT_THEME_KEY: str = "light"
 SCHEMA_VERSION: int = 2
 STARTUP_TIMEOUT_SECONDS: float = 15.0

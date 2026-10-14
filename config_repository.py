@@ -2,7 +2,12 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from authentication_types import AuthenticationType, authentication_type_of_key
-from database_manager import DEFAULT_THEME_KEY, THEME_SETTING, DatabaseManager
+from database_manager import (
+    CURRENT_INSTANCE_SETTING,
+    DEFAULT_THEME_KEY,
+    THEME_SETTING,
+    DatabaseManager,
+)
 from secret_store import SecretError, decode_details, encode_details
 
 INSTANCE_QUERY: str = "SELECT id, name, address FROM instance ORDER BY name COLLATE NOCASE"
@@ -76,6 +81,13 @@ class ConfigRepository:
 
     def set_theme_key(self, key: str) -> None:
         self.set_configuration_value(THEME_SETTING, key)
+
+    def current_instance_id(self) -> int:
+        value = self.configuration_value(CURRENT_INSTANCE_SETTING, "")
+        return int(value) if value.isdigit() else 0
+
+    def set_current_instance_id(self, instance_id: int) -> None:
+        self.set_configuration_value(CURRENT_INSTANCE_SETTING, str(instance_id))
 
     def create_instance(self, name: str, address: str) -> int:
         def operation(connection: sqlite3.Connection) -> int:

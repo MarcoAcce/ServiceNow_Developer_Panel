@@ -42,6 +42,9 @@ class ScriptResponseTab(ResponseTab):
     def on_row_selected(self, record: dict[str, str]) -> None:
         self.script_preview.setPlainText(record.get(self.script_field, ""))
 
+    def result_updated(self) -> None:
+        self.script_preview.clear()
+
 
 class AclResponseTab(ScriptResponseTab):
 

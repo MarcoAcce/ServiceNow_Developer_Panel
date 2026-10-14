@@ -8,22 +8,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from config_repository import ConfigRepository
+from instance_selector import InstanceSelector
 from request_types import GROUP_ORDER, RequestType, request_types_of_group
 from tab import Tab
-from ui_widgets import hint_label, title_label, vertical_spacer
+from ui_widgets import hint_label, horizontal_rule, section_label, title_label, vertical_spacer
 
 BUTTONS_PER_ROW: int = 3
 BUTTON_MINIMUM_HEIGHT: int = 48
 HOME_HINT: str = "Pick a request type: a new request tab opens where you can set the target table and the filters."
+INSTANCE_SECTION: str = "Working instance"
+INSTANCE_HINT: str = "The request tabs opened from here start on this instance and its active authentication method."
 
 
 class HomeTab(Tab):
 
     requestSelected = Signal(object)
 
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, repository: ConfigRepository) -> None:
         super().__init__(title)
+        self.instance_selector: InstanceSelector = InstanceSelector(repository)
         self._build_ui()
+
+    def reload_instances(self) -> None:
+        self.instance_selector.reload()
+
+    def current_instance_id(self) -> int:
+        return self.instance_selector.current_instance_id()
 
     def _build_ui(self) -> None:
         main_layout = QVBoxLayout(self)
@@ -41,7 +52,12 @@ class HomeTab(Tab):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(content)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(scroll, 1)
+
+        main_layout.addWidget(horizontal_rule())
+        main_layout.addWidget(section_label(INSTANCE_SECTION))
+        main_layout.addWidget(hint_label(INSTANCE_HINT))
+        main_layout.addWidget(self.instance_selector)
 
     def _build_group(self, group: str) -> QGroupBox:
         box = QGroupBox(group)

@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from config_repository import ConfigRepository
 from filter_fields import BooleanFilterField, DateFilterField, RadioChoiceField
+from instance_selector import InstanceSelector
 from query_builder import (
     AND_SEPARATOR,
     OPERATOR_IS,
@@ -83,11 +85,18 @@ class RequestTab(Tab):
 
     executed = Signal(object)
     closed = Signal()
+    runningChanged = Signal(bool)
 
-    def __init__(self, request_type: RequestType, service: RequestService) -> None:
+    def __init__(
+        self,
+        request_type: RequestType,
+        service: RequestService,
+        repository: ConfigRepository,
+    ) -> None:
         super().__init__(request_type.label)
         self.request_type: RequestType = request_type
         self._service: RequestService = service
+        self.instance_selector: InstanceSelector = InstanceSelector(repository, compact=True)
         self._call: RequestCall | None = None
         self._filters: list[FilterEntry] = []
         self._required: list[RequiredEntry] = []
@@ -243,6 +252,8 @@ class RequestTab(Tab):
         root.addWidget(horizontal_rule())
         root.addWidget(self._build_content(), 1)
         root.addWidget(horizontal_rule())
+        root.addWidget(self.instance_selector)
+        root.addWidget(horizontal_rule())
         root.addLayout(self._build_footer())
 
     def _build_content(self) -> QScrollArea:
@@ -345,6 +356,13 @@ class RequestTab(Tab):
         self._call = self._service.send(self.build_request())
         self._call.succeeded.connect(self._on_succeeded)
         self._call.failed.connect(self._on_failed)
+        self.runningChanged.emit(True)
+
+    def reload_instances(self) -> None:
+        self.instance_selector.reload()
+
+    def set_instance_id(self, instance_id: int) -> None:
+        self.instance_selector.set_instance_id(instance_id)
 
     def build_request(self) -> RequestSpec:
         return RequestSpec(
@@ -352,6 +370,7 @@ class RequestTab(Tab):
             table=self.target_table(),
             parameters=self._build_parameters(),
             columns=self.columns(),
+            target=self.instance_selector.current_target(),
         )
 
     def _build_parameters(self) -> dict[str, str]:
@@ -411,3 +430,4 @@ class RequestTab(Tab):
             self._call.deleteLater()
             self._call = None
         self._update_execute_state()
+        self.runningChanged.emit(False)

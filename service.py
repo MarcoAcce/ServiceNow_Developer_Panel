@@ -3,13 +3,37 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from authentication_types import type_label
+from config_repository import Authentication, Instance
 from request_types import RequestType
 
 TABLE_API_PATH: str = "/api/now/table"
+NO_INSTANCE_LABEL: str = "no instance"
+NO_AUTHENTICATION_LABEL: str = "no active authentication method"
 
 
 class ServiceConfigurationError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class RequestTarget:
+    instance: Instance | None = None
+    authentication: Authentication | None = None
+
+    @property
+    def label(self) -> str:
+        return self.instance.name if self.instance is not None else NO_INSTANCE_LABEL
+
+    @property
+    def address(self) -> str:
+        return self.instance.address if self.instance is not None else ""
+
+    @property
+    def authentication_label(self) -> str:
+        if self.authentication is None:
+            return NO_AUTHENTICATION_LABEL
+        return type_label(self.authentication.authentication_type)
 
 
 @dataclass(frozen=True)
@@ -18,6 +42,7 @@ class RequestSpec:
     table: str
     parameters: dict[str, str]
     columns: tuple[str, ...]
+    target: RequestTarget = field(default_factory=RequestTarget)
 
     @property
     def path(self) -> str:
@@ -60,6 +85,10 @@ class RequestResult:
     @property
     def query_string(self) -> str:
         return self.request.query_string
+
+    @property
+    def target(self) -> RequestTarget:
+        return self.request.target
 
 
 @dataclass(frozen=True)
