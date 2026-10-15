@@ -1,9 +1,13 @@
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QLabel,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QWidget,
 )
 
@@ -97,3 +101,23 @@ def vertical_spacer() -> QWidget:
     spacer = QWidget()
     spacer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
     return spacer
+
+
+def configure_table(widget: QTableWidget) -> None:
+    widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    widget.setAlternatingRowColors(True)
+    widget.setSortingEnabled(False)
+    widget.verticalHeader().setVisible(False)
+    widget.horizontalHeader().setStretchLastSection(True)
+
+
+def check_item(checked: bool) -> QTableWidgetItem:
+    item = QTableWidgetItem()
+    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    item.setCheckState(
+        Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+    )
+    return item

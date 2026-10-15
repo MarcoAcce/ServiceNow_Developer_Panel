@@ -31,13 +31,25 @@ from query_builder import (
 from request_hints import RequestHintRepository
 from request_types import ANY_VALUE, RequestType
 from response_tab import RecordsResponseTab, ResponseTab
-from service import RequestCall, RequestError, RequestResult, RequestService, RequestSpec
+from service import (
+    FIELDS_PARAMETER,
+    LIMIT_PARAMETER,
+    ORDER_PARAMETER,
+    QUERY_PARAMETER,
+    RequestCall,
+    RequestError,
+    RequestResult,
+    RequestService,
+    RequestSpec,
+)
 from suggestion_field import SuggestionField
 from tab import Tab
 from table_query_form import (
     DEFAULT_LIMIT,
+    FIELDS_LABEL,
     FIELDS_PLACEHOLDER,
     MAXIMUM_LIMIT,
+    ORDER_LABEL,
     ORDER_PLACEHOLDER,
     QUERY_HINT,
     RECORD_COUNT_HINT,
@@ -244,6 +256,8 @@ class RequestTab(Tab):
 
 
 class TableRequestTab(RequestTab):
+
+    fields_option: bool = True
 
     def __init__(
         self,
@@ -507,8 +521,9 @@ class TableRequestTab(RequestTab):
         self.limit_field.setRange(1, MAXIMUM_LIMIT)
         self.limit_field.setValue(DEFAULT_LIMIT)
         self.limit_field.setGroupSeparatorShown(True)
-        layout.addRow("Fields", self.fields_field)
-        layout.addRow("Order by", self.order_field)
+        if self.fields_option:
+            layout.addRow(FIELDS_LABEL, self.fields_field)
+        layout.addRow(ORDER_LABEL, self.order_field)
         layout.addRow(RECORD_COUNT_LABEL, self.limit_field)
         layout.addRow(hint_label(RECORD_COUNT_HINT))
         return options
@@ -517,14 +532,14 @@ class TableRequestTab(RequestTab):
         parameters: dict[str, str] = {}
         query = self._build_encoded_query()
         if query:
-            parameters["sysparm_query"] = query
+            parameters[QUERY_PARAMETER] = query
         fields = self.fields_field.text().strip()
-        if fields:
-            parameters["sysparm_fields"] = fields
+        if fields and self.fields_option:
+            parameters[FIELDS_PARAMETER] = fields
         order = self.order_field.text().strip()
         if order:
-            parameters["sysparm_order_by"] = order
-        parameters["sysparm_limit"] = str(self.limit_field.value())
+            parameters[ORDER_PARAMETER] = order
+        parameters[LIMIT_PARAMETER] = str(self.limit_field.value())
         return parameters
 
     def _build_encoded_query(self) -> str:

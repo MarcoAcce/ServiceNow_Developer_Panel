@@ -12,16 +12,19 @@ from PySide6.QtWidgets import (
 
 from dialogs import CANCEL_LABEL, FramelessDialog
 from query_builder import QueryBuilder
-from service import LIMIT_PARAMETER, RequestPart
+from service import (
+    FIELDS_PARAMETER,
+    LIMIT_PARAMETER,
+    ORDER_PARAMETER,
+    QUERY_PARAMETER,
+    RequestPart,
+)
 from suggestion_field import SuggestionField
 from ui_widgets import hint_label, primary_button, section_label
 
 DEFAULT_LIMIT: int = 1000
 MAXIMUM_LIMIT: int = 100000
 SINGLE_CALL_LIMIT: int = 10000
-FIELDS_PARAMETER: str = "sysparm_fields"
-ORDER_PARAMETER: str = "sysparm_order_by"
-QUERY_PARAMETER: str = "sysparm_query"
 FIELD_SEPARATOR: str = ","
 TABLE_LABEL: str = "Table *"
 TABLE_PLACEHOLDER: str = "Table name, for example incident"

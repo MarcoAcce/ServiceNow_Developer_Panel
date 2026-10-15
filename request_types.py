@@ -45,6 +45,15 @@ ACL_LIST: RequestType = RequestType(
     table="sys_security_acl",
     description="Inspect the access controls of a table or a single field.",
 )
+VERIFY_SECURITY: RequestType = RequestType(
+    key="verify_security",
+    label="Verify security",
+    group=GROUP_SECURITY,
+    table="sys_security_acl",
+    description=(
+        "Check whether a set of roles can run an operation on a table or a field."
+    ),
+)
 CLIENT_SCRIPT_LIST: RequestType = RequestType(
     key="client_script_list",
     label="Client scripts",
@@ -93,6 +102,7 @@ REQUEST_TYPES: tuple[RequestType, ...] = (
     MULTIPLE_TABLES,
     TABLE_DICTIONARY,
     ACL_LIST,
+    VERIFY_SECURITY,
     CLIENT_SCRIPT_LIST,
     BUSINESS_RULE_LIST,
     SCRIPT_INCLUDE_LIST,

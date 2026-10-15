@@ -2,7 +2,6 @@ from collections.abc import Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -41,6 +40,7 @@ from table_query_form import (
     order_of,
 )
 from ui_widgets import (
+    configure_table,
     hint_label,
     horizontal_rule,
     primary_button,
@@ -465,16 +465,6 @@ class MultipleTablesResponseTab(ResponseTab):
         if cancel:
             call.cancel()
         call.deleteLater()
-
-
-def configure_table(widget: QTableWidget) -> None:
-    widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-    widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    widget.setAlternatingRowColors(True)
-    widget.setSortingEnabled(False)
-    widget.verticalHeader().setVisible(False)
-    widget.horizontalHeader().setStretchLastSection(True)
 
 
 def cancel_task(task: BackgroundTask | None) -> None:

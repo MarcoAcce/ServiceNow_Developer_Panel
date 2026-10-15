@@ -24,6 +24,7 @@ from response_context import ResponseContext
 from service import RequestResult
 from tab import Tab
 from ui_widgets import (
+    check_item,
     hint_label,
     horizontal_rule,
     section_label,
@@ -50,6 +51,7 @@ RANGE_TEXT: str = "{start} to {end} of {count}"
 MATCHING_TEXT: str = "{start} to {end} of {matching} matching, {total} received"
 NO_MATCH_TEXT: str = "0 of {total}"
 PAGER_SPACING: int = 8
+TRUE_VALUE: str = "true"
 
 
 def received_columns(result: RequestResult) -> tuple[str, ...]:
@@ -215,6 +217,7 @@ class RecordsResponseTab(ResponseTab):
 
     def __init__(self, result: RequestResult) -> None:
         self._columns: tuple[str, ...] = ()
+        self._checkboxes: tuple[str, ...] = ()
         self._filtered: list[int] = []
         self._page: int = 0
         self._sort_column: int = -1
@@ -232,6 +235,15 @@ class RecordsResponseTab(ResponseTab):
 
     def columns(self) -> tuple[str, ...]:
         return received_columns(self.result)
+
+    def checkbox_columns(self) -> tuple[str, ...]:
+        return ()
+
+    def export_columns(self) -> tuple[str, ...]:
+        return received_columns(self.result)
+
+    def records(self) -> list[dict[str, str]]:
+        return self.result.records
 
     def column_label(self, column: str) -> str:
         return column.replace("_", " ").capitalize()
@@ -299,6 +311,7 @@ class RecordsResponseTab(ResponseTab):
 
     def _fill_table(self) -> None:
         self._columns = self.columns()
+        self._checkboxes = self.checkbox_columns()
         self._sort_column = -1
         self._sort_order = Qt.SortOrder.AscendingOrder
         self.table_widget.clearContents()
@@ -314,7 +327,7 @@ class RecordsResponseTab(ResponseTab):
 
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
-        records = self.result.records
+        records = self.records()
         if needle:
             self._filtered = [
                 index
@@ -334,21 +347,21 @@ class RecordsResponseTab(ResponseTab):
         if not 0 <= self._sort_column < len(self._columns):
             return
         column = self._columns[self._sort_column]
-        records = self.result.records
+        records = self.records()
         self._filtered.sort(
             key=lambda index: records[index].get(column, "").lower(),
             reverse=self._sort_order == Qt.SortOrder.DescendingOrder,
         )
 
     def _fill_page(self) -> None:
-        records = self.result.records
+        records = self.records()
         indexes = self._page_indexes()
         self.table_widget.clearContents()
         self.table_widget.setRowCount(len(indexes))
         for row, index in enumerate(indexes):
             record = records[index]
             for column_index, column in enumerate(self._columns):
-                item = QTableWidgetItem(record.get(column, ""))
+                item = self._cell_item(column, record)
                 item.setData(Qt.ItemDataRole.UserRole, index)
                 self.table_widget.setItem(row, column_index, item)
         self.table_widget.resizeColumnsToContents()
@@ -369,8 +382,14 @@ class RecordsResponseTab(ResponseTab):
         self.previous_button.setEnabled(self._page > 0)
         self.next_button.setEnabled(self._page + 1 < pages)
 
+    def _cell_item(self, column: str, record: dict[str, str]) -> QTableWidgetItem:
+        value = record.get(column, "")
+        if column not in self._checkboxes:
+            return QTableWidgetItem(value)
+        return check_item(value == TRUE_VALUE)
+
     def _update_record_count(self) -> None:
-        total = len(self.result.records)
+        total = len(self.records())
         matching = len(self._filtered)
         if not matching:
             self.record_count_label.setText(NO_MATCH_TEXT.format(total=total))
@@ -416,10 +435,11 @@ class RecordsResponseTab(ResponseTab):
         items = self.table_widget.selectedItems()
         if not items:
             return None
+        records = self.records()
         index = items[0].data(Qt.ItemDataRole.UserRole)
-        if not isinstance(index, int) or index >= len(self.result.records):
+        if not isinstance(index, int) or index >= len(records):
             return None
-        return self.result.records[index]
+        return records[index]
 
     def _on_selection_changed(self) -> None:
         record = self._selected_record()
@@ -431,11 +451,11 @@ class RecordsResponseTab(ResponseTab):
         path, _ = QFileDialog.getSaveFileName(self, "Save response", suggestion, "CSV files (*.csv)")
         if not path:
             return
-        columns = received_columns(self.result)
+        columns = self.export_columns()
         try:
             with Path(path).open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=list(columns), extrasaction="ignore")
                 writer.writeheader()
-                writer.writerows(self.result.records)
+                writer.writerows(self.records())
         except OSError as error:
             show_error(self, SAVE_ERROR_TITLE, str(error))
