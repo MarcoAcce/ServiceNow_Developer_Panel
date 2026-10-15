@@ -12,20 +12,21 @@ from PySide6.QtWidgets import (
 
 from dialogs import CANCEL_LABEL, FramelessDialog
 from query_builder import QueryBuilder
-from service import (
+from request_model import (
+    FIELD_SEPARATOR,
     FIELDS_PARAMETER,
     LIMIT_PARAMETER,
+    MAXIMUM_LIMIT,
     ORDER_PARAMETER,
     QUERY_PARAMETER,
     RequestPart,
+    table_parameters,
 )
 from suggestion_field import SuggestionField
 from ui_widgets import hint_label, primary_button, section_label
 
 DEFAULT_LIMIT: int = 1000
-MAXIMUM_LIMIT: int = 100000
 SINGLE_CALL_LIMIT: int = 10000
-FIELD_SEPARATOR: str = ","
 TABLE_LABEL: str = "Table *"
 TABLE_PLACEHOLDER: str = "Table name, for example incident"
 FIELDS_LABEL: str = "Fields"
@@ -101,18 +102,12 @@ class TableQueryForm(QWidget):
         )
 
     def _parameters(self) -> dict[str, str]:
-        parameters: dict[str, str] = {}
-        query = self.query_builder.encoded_query()
-        if query:
-            parameters[QUERY_PARAMETER] = query
-        fields = FIELD_SEPARATOR.join(self._columns())
-        if fields:
-            parameters[FIELDS_PARAMETER] = fields
-        order = self.order_field.text().strip()
-        if order:
-            parameters[ORDER_PARAMETER] = order
-        parameters[LIMIT_PARAMETER] = str(self.limit_field.value())
-        return parameters
+        return table_parameters(
+            self.query_builder.encoded_query(),
+            self._columns(),
+            self.order_field.text().strip(),
+            self.limit_field.value(),
+        )
 
     def _build_ui(self) -> None:
         self.table_field.setPlaceholderText(TABLE_PLACEHOLDER)

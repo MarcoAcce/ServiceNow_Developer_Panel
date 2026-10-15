@@ -5,4 +5,6 @@ PySide6_Pdf==6.12.0.140
 PySide6_WebEngine==6.12.0.140
 shiboken6==6.12.0
 cryptography==50.0.2
+mcp==2.3.0
+openpyxl==3.1.5
 pyinstaller==6.22.3

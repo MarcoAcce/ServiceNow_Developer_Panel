@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "servicenow-panel": {
+      "command": "${CLAUDE_PROJECT_DIR:-.}/virtual_environment/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/mcp_server.py"]
+    }
+  }
+}

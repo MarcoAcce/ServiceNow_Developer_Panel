@@ -115,6 +115,22 @@ def read_cache_tables(name: str) -> list[CacheTable] | None:
         connection.close()
 
 
+def cache_row_counts(name: str) -> dict[str, int] | None:
+    if not cache_exists(name):
+        return None
+    connection = sqlite3.connect(cache_path(name))
+    try:
+        names = [str(row[0]) for row in connection.execute(TABLE_NAMES_QUERY).fetchall()]
+        return {table_name: count_rows(connection, table_name) for table_name in names}
+    finally:
+        connection.close()
+
+
+def count_rows(connection: sqlite3.Connection, name: str) -> int:
+    row = connection.execute(f"SELECT COUNT(*) FROM {quoted(name)}").fetchone()
+    return int(row[0]) if row is not None else 0
+
+
 def read_table(connection: sqlite3.Connection, name: str) -> CacheTable:
     cursor = connection.execute(f"SELECT * FROM {quoted(name)}")
     columns = tuple(str(column[0]) for column in cursor.description or ())

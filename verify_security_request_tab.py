@@ -5,13 +5,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from acl_requests import (
-    ACL_TABLE,
-    CONTROL_LIMIT,
-    NAME_FIELD,
-    acl_composite,
-    control_query,
-)
+from acl_requests import verification_request
 from acl_verification import FIELD_OPERATIONS, OPERATIONS, Verification
 from config_repository import ConfigRepository
 from filter_fields import RadioChoiceField
@@ -20,14 +14,7 @@ from request_tab import RequestTab, required_label, required_message
 from request_types import VERIFY_SECURITY
 from response_tab import ResponseTab
 from role_field import UserRoleField
-from service import (
-    LIMIT_PARAMETER,
-    ORDER_PARAMETER,
-    QUERY_PARAMETER,
-    RequestResult,
-    RequestService,
-    RequestSpec,
-)
+from service import RequestResult, RequestService, RequestSpec
 from suggestion_field import SuggestionField
 from table_query_form import TABLE_PLACEHOLDER
 from ui_widgets import hint_label, section_label, vertical_spacer
@@ -107,21 +94,11 @@ class VerifySecurityRequestTab(RequestTab):
 
     def build_request(self) -> RequestSpec:
         verification = self.verification()
-        parameters = {
-            QUERY_PARAMETER: control_query(
-                verification.names, verification.control_operation
-            ),
-            ORDER_PARAMETER: NAME_FIELD,
-            LIMIT_PARAMETER: str(CONTROL_LIMIT),
-        }
-        spec = RequestSpec(
-            request_type=self.request_type,
-            table=ACL_TABLE,
-            parameters=parameters,
-            columns=(),
-            target=self.instance_selector.current_target(),
+        return verification_request(
+            verification.names,
+            verification.control_operation,
+            self.instance_selector.current_target(),
         )
-        return acl_composite(spec, verification.names)
 
     def create_response_tab(self, result: RequestResult) -> ResponseTab:
         return VerifySecurityResponseTab(result, self.verification())

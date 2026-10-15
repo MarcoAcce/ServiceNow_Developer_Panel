@@ -19,7 +19,7 @@ DEFAULT_THEME_KEY: str = "light"
 DEFAULT_CACHE_LIFETIME_MINUTES: int = 5
 DEFAULT_SUGGESTION_COUNT: int = 15
 RESPONSE_TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
-SCHEMA_VERSION: int = 5
+SCHEMA_VERSION: int = 6
 STARTUP_TIMEOUT_SECONDS: float = 15.0
 WRITE_TIMEOUT_SECONDS: float = 15.0
 SHUTDOWN_TIMEOUT_SECONDS: float = 15.0
@@ -96,6 +96,22 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_request_suggestions_table
         ON request_suggestions (target_table_name)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS mcp_authentication (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_id INTEGER NOT NULL
+            REFERENCES instance (id) ON DELETE CASCADE ON UPDATE CASCADE,
+        authentication_type TEXT NOT NULL,
+        authentication_details TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1))
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_mcp_authentication_instance "
+    "ON mcp_authentication (instance_id)",
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_authentication_active
+        ON mcp_authentication (instance_id) WHERE active = 1
     """,
 )
 

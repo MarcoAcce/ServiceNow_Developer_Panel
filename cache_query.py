@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -6,6 +7,21 @@ from response_cache import text_of
 
 MAXIMUM_ROWS: int = 2000
 STATEMENT_END: str = ";"
+READ_ONLY_MODE: str = "?mode=ro"
+QUERY_TIMEOUT_SECONDS: float = 30.0
+PROGRESS_INTERVAL: int = 10000
+DENIED_ACTIONS: frozenset[int] = frozenset({sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH})
+ALLOWED_PRAGMAS: frozenset[str] = frozenset(
+    {
+        "table_info",
+        "table_xinfo",
+        "table_list",
+        "index_list",
+        "index_info",
+        "index_xinfo",
+        "foreign_key_list",
+    }
+)
 EMPTY_SCRIPT_MESSAGE: str = "write a query before running it"
 MISSING_CACHE_MESSAGE: str = (
     "the local cache of this response is not available: refresh the request to build it again"
@@ -46,17 +62,41 @@ def is_statement(text: str) -> bool:
     return bool(text.strip().strip(STATEMENT_END).strip())
 
 
-def run_script(path: Path, script: str) -> QueryOutcome:
+def run_script(path: Path, script: str, read_only: bool = False) -> QueryOutcome:
     statements = split_statements(script)
     if not statements:
         raise ValueError(EMPTY_SCRIPT_MESSAGE)
     if not path.is_file():
         raise ValueError(MISSING_CACHE_MESSAGE)
-    connection = sqlite3.connect(path)
+    connection = open_cache(path, read_only)
     try:
         return _run_statements(connection, statements)
     finally:
         connection.close()
+
+
+def open_cache(path: Path, read_only: bool) -> sqlite3.Connection:
+    if not read_only:
+        return sqlite3.connect(path)
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}{READ_ONLY_MODE}", uri=True)
+    connection.set_authorizer(sandbox_authorizer)
+    deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
+    connection.set_progress_handler(lambda: int(time.monotonic() > deadline), PROGRESS_INTERVAL)
+    return connection
+
+
+def sandbox_authorizer(
+    action: int,
+    first: str | None,
+    second: str | None,
+    database: str | None,
+    trigger: str | None,
+) -> int:
+    if action in DENIED_ACTIONS:
+        return sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_PRAGMA and (first or "").lower() not in ALLOWED_PRAGMAS:
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
 
 
 def _run_statements(
