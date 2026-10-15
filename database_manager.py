@@ -14,10 +14,12 @@ from response_cache import cache_names, delete_cache
 THEME_SETTING: str = "theme"
 CURRENT_INSTANCE_SETTING: str = "current_instance"
 CACHE_LIFETIME_SETTING: str = "cache_lifetime_minutes"
+SUGGESTION_COUNT_SETTING: str = "suggestion_count"
 DEFAULT_THEME_KEY: str = "light"
 DEFAULT_CACHE_LIFETIME_MINUTES: int = 5
+DEFAULT_SUGGESTION_COUNT: int = 15
 RESPONSE_TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
-SCHEMA_VERSION: int = 3
+SCHEMA_VERSION: int = 5
 STARTUP_TIMEOUT_SECONDS: float = 15.0
 WRITE_TIMEOUT_SECONDS: float = 15.0
 SHUTDOWN_TIMEOUT_SECONDS: float = 15.0
@@ -71,12 +73,29 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         cache_name TEXT NOT NULL UNIQUE
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS request_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_type TEXT NOT NULL,
+        target_table_name TEXT NOT NULL,
+        target_field_name TEXT,
+        last_sent_date TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_authentication_instance ON authentication (instance_id)",
     "CREATE INDEX IF NOT EXISTS idx_response_instance ON response (instance_id)",
     "CREATE INDEX IF NOT EXISTS idx_response_received_at ON response (received_at)",
     """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_authentication_active
         ON authentication (instance_id) WHERE active = 1
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_request_suggestions_key
+        ON request_suggestions (request_type, target_table_name, IFNULL(target_field_name, ''))
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_request_suggestions_table
+        ON request_suggestions (target_table_name)
     """,
 )
 
@@ -88,6 +107,10 @@ SEED_STATEMENTS: tuple[tuple[str, tuple[object, ...]], ...] = (
     (
         "INSERT OR IGNORE INTO local_configuration (name, value) VALUES (?, ?)",
         (CACHE_LIFETIME_SETTING, str(DEFAULT_CACHE_LIFETIME_MINUTES)),
+    ),
+    (
+        "INSERT OR IGNORE INTO local_configuration (name, value) VALUES (?, ?)",
+        (SUGGESTION_COUNT_SETTING, str(DEFAULT_SUGGESTION_COUNT)),
     ),
 )
 
@@ -174,11 +197,17 @@ class DatabaseManager:
         return self._read_connection().execute(statement, parameters).fetchone()
 
     def cache_lifetime_minutes(self) -> int:
-        row = self.query_one(CONFIGURATION_VALUE_QUERY, (CACHE_LIFETIME_SETTING,))
+        return self._setting_count(CACHE_LIFETIME_SETTING, DEFAULT_CACHE_LIFETIME_MINUTES)
+
+    def suggestion_count(self) -> int:
+        return self._setting_count(SUGGESTION_COUNT_SETTING, DEFAULT_SUGGESTION_COUNT)
+
+    def _setting_count(self, name: str, default: int) -> int:
+        row = self.query_one(CONFIGURATION_VALUE_QUERY, (name,))
         value = str(row["value"]).strip() if row is not None else ""
         if value.isdigit() and int(value) > 0:
             return int(value)
-        return DEFAULT_CACHE_LIFETIME_MINUTES
+        return default
 
     def purge_expired_responses(self) -> int:
         cutoff = datetime.now() - timedelta(minutes=self.cache_lifetime_minutes())

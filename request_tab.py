@@ -8,8 +8,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -26,9 +28,11 @@ from query_builder import (
     QueryOperator,
     build_condition,
 )
+from request_hints import RequestHintRepository
 from request_types import ANY_VALUE, RequestType
 from response_tab import ResponseTab
 from service import RequestCall, RequestError, RequestResult, RequestService, RequestSpec
+from suggestion_field import SuggestionField
 from tab import Tab
 from ui_widgets import (
     hint_label,
@@ -52,6 +56,7 @@ IDLE_MESSAGE: str = "Ready to send through {source}."
 RUNNING_MESSAGE: str = "Sending request..."
 RESULT_MESSAGE: str = "{count} records received in {elapsed} ms."
 ERROR_MESSAGE: str = "Request failed: {message}"
+ERROR_TITLE: str = "Request failed"
 TABLE_REQUIRED_MESSAGE: str = "Target table is required to send the request."
 REQUIRED_MESSAGE: str = "{label} is required to send the request."
 REQUIRED_SUFFIX: str = " *"
@@ -98,15 +103,23 @@ class RequestTab(Tab):
         request_type: RequestType,
         service: RequestService,
         repository: ConfigRepository,
+        hints: RequestHintRepository,
     ) -> None:
         super().__init__(request_type.label)
         self.request_type: RequestType = request_type
         self._service: RequestService = service
+        self._hints: RequestHintRepository = hints
         self.instance_selector: InstanceSelector = InstanceSelector(repository, compact=True)
         self._call: RequestCall | None = None
         self._filters: list[FilterEntry] = []
         self._required: list[RequiredEntry] = []
-        self.table_field: QLineEdit = QLineEdit(request_type.table)
+        self._table_hint: QLineEdit | None = None
+        self._field_hint: QLineEdit | None = None
+        self.table_field: QLineEdit = (
+            QLineEdit(request_type.table)
+            if request_type.table
+            else self.table_suggestion_field()
+        )
         self.query_builder: QueryBuilder = QueryBuilder()
         self.fields_field: QLineEdit = QLineEdit()
         self.order_field: QLineEdit = QLineEdit()
@@ -146,6 +159,31 @@ class RequestTab(Tab):
 
     def target_table(self) -> str:
         return self.table_field.text().strip()
+
+    def table_suggestion_field(self) -> SuggestionField:
+        widget = SuggestionField(self.table_suggestions)
+        self._table_hint = widget
+        return widget
+
+    def field_suggestion_field(self) -> SuggestionField:
+        widget = SuggestionField(self.field_suggestions)
+        self._field_hint = widget
+        return widget
+
+    def table_suggestions(self) -> list[str]:
+        return self._hints.table_names(self.request_type.key)
+
+    def field_suggestions(self) -> list[str]:
+        return self._hints.field_names(self.request_type.key, self.hinted_table())
+
+    def hinted_table(self) -> str:
+        return self._table_hint.text().strip() if self._table_hint is not None else ""
+
+    def hinted_field(self) -> str:
+        widget = self._field_hint
+        if widget is None or widget.isHidden():
+            return ""
+        return widget.text().strip()
 
     def missing_requirement(self) -> str:
         if not self.target_table():
@@ -199,6 +237,32 @@ class RequestTab(Tab):
         widget.setClearButtonEnabled(True)
         self._register_filter(field, required_label(label), widget, operator)
         self.require(widget, message or required_message(label))
+        return widget
+
+    def add_table_filter(
+        self,
+        field: str,
+        label: str,
+        placeholder: str = TABLE_PLACEHOLDER,
+        operator: QueryOperator = OPERATOR_IS,
+        message: str = "",
+    ) -> SuggestionField:
+        widget = self.table_suggestion_field()
+        widget.setPlaceholderText(placeholder)
+        self._register_filter(field, required_label(label), widget, operator)
+        self.require(widget, message or required_message(label))
+        return widget
+
+    def add_field_filter(
+        self,
+        field: str,
+        label: str,
+        placeholder: str = "",
+        operator: QueryOperator = OPERATOR_IS,
+    ) -> SuggestionField:
+        widget = self.field_suggestion_field()
+        widget.setPlaceholderText(placeholder)
+        self._register_filter(field, label, widget, operator)
         return widget
 
     def add_choice_filter(
@@ -339,6 +403,10 @@ class RequestTab(Tab):
 
     def _build_footer(self) -> QHBoxLayout:
         footer = QHBoxLayout()
+        self.status_label.setWordWrap(True)
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self.execute_button.setDefault(True)
         self.execute_button.clicked.connect(self.execute)
         self.close_button.clicked.connect(self._on_close_clicked)
@@ -365,6 +433,11 @@ class RequestTab(Tab):
         self._call.succeeded.connect(self._on_succeeded)
         self._call.failed.connect(self._on_failed)
         self.runningChanged.emit(True)
+
+    def _record_hint(self) -> None:
+        table = self.hinted_table()
+        if table:
+            self._hints.record(self.request_type.key, table, self.hinted_field() or None)
 
     def reload_instances(self) -> None:
         self.instance_selector.reload()
@@ -423,6 +496,7 @@ class RequestTab(Tab):
 
     def _on_succeeded(self, result: RequestResult) -> None:
         self._release_call()
+        self._record_hint()
         show_status(
             self.status_label,
             RESULT_MESSAGE.format(count=len(result.records), elapsed=result.elapsed_ms),
@@ -432,6 +506,7 @@ class RequestTab(Tab):
     def _on_failed(self, error: RequestError) -> None:
         self._release_call()
         show_status(self.status_label, ERROR_MESSAGE.format(message=error.message), failed=True)
+        QMessageBox.warning(self, ERROR_TITLE, error.message)
 
     def _release_call(self) -> None:
         if self._call is not None:

@@ -6,6 +6,7 @@ from database_manager import (
     CACHE_LIFETIME_SETTING,
     CURRENT_INSTANCE_SETTING,
     DEFAULT_THEME_KEY,
+    SUGGESTION_COUNT_SETTING,
     THEME_SETTING,
     DatabaseManager,
 )
@@ -88,6 +89,12 @@ class ConfigRepository:
 
     def set_cache_lifetime_minutes(self, minutes: int) -> None:
         self.set_configuration_value(CACHE_LIFETIME_SETTING, str(minutes))
+
+    def suggestion_count(self) -> int:
+        return self._database.suggestion_count()
+
+    def set_suggestion_count(self, count: int) -> None:
+        self.set_configuration_value(SUGGESTION_COUNT_SETTING, str(count))
 
     def current_instance_id(self) -> int:
         value = self.configuration_value(CURRENT_INSTANCE_SETTING, "")
