@@ -40,8 +40,14 @@ from ui_widgets import (
     vertical_spacer,
 )
 
-DEFAULT_LIMIT: int = 50
-MAXIMUM_LIMIT: int = 10000
+DEFAULT_LIMIT: int = 1000
+MAXIMUM_LIMIT: int = 100000
+SINGLE_CALL_LIMIT: int = 10000
+RECORD_COUNT_LABEL: str = "Number of records"
+RECORD_COUNT_HINT: str = (
+    f"The instance returns at most {SINGLE_CALL_LIMIT} records per call: asking for more than "
+    f"{SINGLE_CALL_LIMIT} splits the request into several calls, which can take a little longer."
+)
 IDLE_MESSAGE: str = "Ready to send through {source}."
 RUNNING_MESSAGE: str = "Sending request..."
 RESULT_MESSAGE: str = "{count} records received in {elapsed} ms."
@@ -324,9 +330,11 @@ class RequestTab(Tab):
         self.order_field.setPlaceholderText("Field used to sort the records")
         self.limit_field.setRange(1, MAXIMUM_LIMIT)
         self.limit_field.setValue(DEFAULT_LIMIT)
+        self.limit_field.setGroupSeparatorShown(True)
         layout.addRow("Fields", self.fields_field)
         layout.addRow("Order by", self.order_field)
-        layout.addRow("Limit", self.limit_field)
+        layout.addRow(RECORD_COUNT_LABEL, self.limit_field)
+        layout.addRow(hint_label(RECORD_COUNT_HINT))
         return options
 
     def _build_footer(self) -> QHBoxLayout:

@@ -6,6 +6,8 @@ from PySide6.QtCore import QObject, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from service import (
+    LIMIT_PARAMETER,
+    OFFSET_PARAMETER,
     FailedRequestCall,
     PreparedRequest,
     RequestCall,
@@ -18,6 +20,7 @@ from service import (
 )
 
 REQUEST_TIMEOUT_MS: int = 30000
+MAXIMUM_PAGE_SIZE: int = 10000
 SERVICE_NAME: str = "ServiceNow instance"
 SERVICE_DESCRIPTION: str = "a live call to the selected instance"
 HTTP_ERROR_STATUS: int = 400
@@ -41,15 +44,19 @@ class HttpRequestCall(RequestCall):
     def __init__(
         self,
         request: RequestSpec,
-        prepared: PreparedRequest,
         manager: QNetworkAccessManager,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(request, parent)
+        self._manager: QNetworkAccessManager = manager
         self._cancelled: bool = False
         self._started: float = time.monotonic()
-        self._reply: QNetworkReply | None = manager.get(network_request(prepared))
-        self._reply.finished.connect(self._on_finished)
+        self._records: list[dict[str, str]] = []
+        self._wanted: int = parameter_value(request, LIMIT_PARAMETER)
+        self._offset: int = parameter_value(request, OFFSET_PARAMETER)
+        self._page_size: int = 0
+        self._reply: QNetworkReply | None = None
+        self._fetch_page()
 
     def is_running(self) -> bool:
         return self._reply is not None and self._reply.isRunning()
@@ -58,6 +65,28 @@ class HttpRequestCall(RequestCall):
         self._cancelled = True
         if self._reply is not None:
             self._reply.abort()
+
+    @property
+    def _paged(self) -> bool:
+        return self._wanted > MAXIMUM_PAGE_SIZE
+
+    def _fetch_page(self) -> None:
+        try:
+            prepared = prepare_request(self.request, self._page_parameters())
+        except ServiceConfigurationError as error:
+            self._emit_error(str(error), 0)
+            return
+        self._reply = self._manager.get(network_request(prepared))
+        self._reply.finished.connect(self._on_finished)
+
+    def _page_parameters(self) -> dict[str, str]:
+        if not self._paged:
+            return {}
+        self._page_size = min(MAXIMUM_PAGE_SIZE, self._wanted - len(self._records))
+        return {
+            LIMIT_PARAMETER: str(self._page_size),
+            OFFSET_PARAMETER: str(self._offset + len(self._records)),
+        }
 
     def _on_finished(self) -> None:
         reply = self._reply
@@ -79,15 +108,24 @@ class HttpRequestCall(RequestCall):
         except ValueError as error:
             self._emit_error(str(error), status)
             return
+        self._records.extend(records)
+        if self._has_more(len(records)):
+            self._fetch_page()
+            return
         self.succeeded.emit(
             RequestResult(
                 request=self.request,
-                records=records,
+                records=self._records,
                 status_code=status,
                 elapsed_ms=self._elapsed_ms(),
                 source=self.request.target.address,
             )
         )
+
+    def _has_more(self, received: int) -> bool:
+        if not self._paged or received < self._page_size:
+            return False
+        return len(self._records) < self._wanted
 
     def _emit_error(self, message: str, status: int) -> None:
         self.failed.emit(
@@ -108,13 +146,18 @@ class HttpRequestService(RequestService):
 
     def send(self, request: RequestSpec) -> RequestCall:
         try:
-            prepared = prepare_request(request)
+            prepare_request(request)
         except ServiceConfigurationError as error:
             return FailedRequestCall(request, str(error), self)
-        return HttpRequestCall(request, prepared, self._manager, self)
+        return HttpRequestCall(request, self._manager, self)
 
     def describe(self) -> str:
         return SERVICE_DESCRIPTION
+
+
+def parameter_value(request: RequestSpec, name: str) -> int:
+    value = request.parameters.get(name, "").strip()
+    return int(value) if value.isdigit() else 0
 
 
 def network_request(prepared: PreparedRequest) -> QNetworkRequest:
