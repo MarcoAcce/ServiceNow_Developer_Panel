@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from dialogs import show_error
 from icons import REFRESH_ICON, IconButton
 from record_columns import ordered_columns
+from response_context import ResponseContext
 from service import RequestResult
 from tab import Tab
 from ui_widgets import (
@@ -58,6 +59,7 @@ def received_columns(result: RequestResult) -> tuple[str, ...]:
 class ResponseTab(Tab):
 
     refreshRequested = Signal(object)
+    runningChanged = Signal(bool)
 
     def __init__(self, result: RequestResult) -> None:
         super().__init__(self.build_menu_title(result))
@@ -66,31 +68,18 @@ class ResponseTab(Tab):
         self._menu_detail: str = self.build_menu_detail(result)
         self._menu_tooltip: str = self.build_menu_tooltip(result)
         self._refreshing: bool = False
-        self._columns: tuple[str, ...] = ()
-        self._filtered: list[int] = []
-        self._page: int = 0
-        self._sort_column: int = -1
-        self._sort_order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
-        self.table_widget: QTableWidget = QTableWidget()
-        self.pager: QWidget = QWidget()
-        self.previous_button: QPushButton = QPushButton(PREVIOUS_LABEL)
-        self.next_button: QPushButton = QPushButton(NEXT_LABEL)
-        self.page_label: QLabel = QLabel()
-        self.filter_field: QLineEdit = QLineEdit()
-        self.record_count_label: QLabel = QLabel()
+        self._context: ResponseContext | None = None
         self.title_hint_label: QLabel = hint_label("")
         self.status_label: QLabel = QLabel()
         self.instance_label: QLabel = QLabel()
         self.authentication_label: QLabel = QLabel()
         self.source_label: QLabel = QLabel()
-        self.endpoint_label: QLabel = QLabel()
-        self.parameters_label: QLabel = QLabel()
         self.status_value_label: QLabel = QLabel()
         self.received_label: QLabel = QLabel()
         self.refresh_button: IconButton = IconButton(REFRESH_ICON, REFRESH_TOOLTIP)
         self._build_ui()
-        self._refresh_summary()
-        self._fill_table()
+        self.refresh_summary()
+        self.fill_content()
 
     @property
     def menu_table(self) -> str:
@@ -128,19 +117,27 @@ class ResponseTab(Tab):
         )
         return "\n".join(line for line in lines if line)
 
-    def columns(self) -> tuple[str, ...]:
-        return received_columns(self.result)
+    @property
+    def context(self) -> ResponseContext | None:
+        return self._context
 
-    def column_label(self, column: str) -> str:
-        return column.replace("_", " ").capitalize()
+    def attach(self, context: ResponseContext) -> None:
+        self._context = context
 
-    def build_details(self, layout: QVBoxLayout) -> None:
+    def build_body(self, layout: QVBoxLayout) -> None:
+        raise NotImplementedError
+
+    def build_summary_rows(self, layout: QFormLayout) -> None:
+        layout.addRow("Instance", self.instance_label)
+        layout.addRow("Authentication", self.authentication_label)
+        layout.addRow("Source", self.source_label)
+        layout.addRow("Status", self.status_value_label)
+        layout.addRow("Received", self.received_label)
+
+    def fill_content(self) -> None:
         return None
 
-    def on_row_selected(self, record: dict[str, str]) -> None:
-        return None
-
-    def result_updated(self) -> None:
+    def cancel(self) -> None:
         return None
 
     def update_result(self, result: RequestResult) -> None:
@@ -149,18 +146,17 @@ class ResponseTab(Tab):
         self._menu_detail = self.build_menu_detail(result)
         self._menu_tooltip = self.build_menu_tooltip(result)
         self.set_refreshing(False)
-        self._refresh_summary()
-        self._fill_table()
-        self.result_updated()
+        self.refresh_summary()
+        self.fill_content()
         self.menu_title = self.build_menu_title(result)
 
     def set_refresh_enabled(self, enabled: bool) -> None:
         self.refresh_button.setEnabled(enabled and not self._refreshing)
 
-    def set_refreshing(self, refreshing: bool) -> None:
+    def set_refreshing(self, refreshing: bool, message: str = REFRESHING_MESSAGE) -> None:
         self._refreshing = refreshing
         self.refresh_button.setEnabled(not refreshing)
-        show_status(self.status_label, REFRESHING_MESSAGE if refreshing else "")
+        show_status(self.status_label, message if refreshing else "")
 
     def show_refresh_error(self, message: str) -> None:
         self._refreshing = False
@@ -170,51 +166,11 @@ class ResponseTab(Tab):
     def is_closable(self) -> bool:
         return True
 
-    def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.addLayout(self._build_header())
-        root.addWidget(self._build_summary())
-        root.addWidget(horizontal_rule())
-        root.addLayout(self._build_toolbar())
-        root.addWidget(self.table_widget)
-        root.addWidget(self._build_pager())
-        self.build_details(root)
+    @property
+    def is_refreshing(self) -> bool:
+        return self._refreshing
 
-        self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table_widget.setAlternatingRowColors(True)
-        self.table_widget.setSortingEnabled(False)
-        self.table_widget.verticalHeader().setVisible(False)
-        self.table_widget.itemSelectionChanged.connect(self._on_selection_changed)
-        header = self.table_widget.horizontalHeader()
-        header.setSectionsClickable(True)
-        header.sectionClicked.connect(self._on_section_clicked)
-
-    def _build_header(self) -> QHBoxLayout:
-        header = QHBoxLayout()
-        header.addWidget(title_label(self.result.request_type.label))
-        header.addWidget(self.title_hint_label, 1)
-        self.refresh_button.clicked.connect(lambda: self.refreshRequested.emit(self))
-        header.addWidget(self.status_label)
-        header.addWidget(self.refresh_button)
-        return header
-
-    def _build_summary(self) -> QWidget:
-        summary = QWidget()
-        layout = QFormLayout(summary)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addRow("Instance", self.instance_label)
-        layout.addRow("Authentication", self.authentication_label)
-        layout.addRow("Source", self.source_label)
-        layout.addRow("Endpoint", self.endpoint_label)
-        layout.addRow("Parameters", self.parameters_label)
-        layout.addRow("Status", self.status_value_label)
-        layout.addRow("Received", self.received_label)
-        layout.addRow("Records", self.record_count_label)
-        return summary
-
-    def _refresh_summary(self) -> None:
+    def refresh_summary(self) -> None:
         target = self.result.target
         address = target.address
         self.title_hint_label.setText(
@@ -227,12 +183,95 @@ class ResponseTab(Tab):
         )
         self.authentication_label.setText(target.authentication_label)
         self.source_label.setText(self.result.source)
-        self.endpoint_label.setText(self.result.endpoint)
-        self.parameters_label.setText(self.result.query_string or "none")
         self.status_value_label.setText(
             f"{self.result.status_code} in {self.result.elapsed_ms} ms"
         )
         self.received_label.setText(self.result.executed_at.strftime(SUMMARY_TIME_FORMAT))
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.addLayout(self._build_header())
+        root.addWidget(self._build_summary())
+        root.addWidget(horizontal_rule())
+        self.build_body(root)
+
+    def _build_summary(self) -> QWidget:
+        summary = QWidget()
+        layout = QFormLayout(summary)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.build_summary_rows(layout)
+        return summary
+
+    def _build_header(self) -> QHBoxLayout:
+        header = QHBoxLayout()
+        header.addWidget(title_label(self.result.request_type.label))
+        header.addWidget(self.title_hint_label, 1)
+        self.refresh_button.clicked.connect(lambda: self.refreshRequested.emit(self))
+        header.addWidget(self.status_label)
+        header.addWidget(self.refresh_button)
+        return header
+
+class RecordsResponseTab(ResponseTab):
+
+    def __init__(self, result: RequestResult) -> None:
+        self._columns: tuple[str, ...] = ()
+        self._filtered: list[int] = []
+        self._page: int = 0
+        self._sort_column: int = -1
+        self._sort_order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
+        self.table_widget: QTableWidget = QTableWidget()
+        self.pager: QWidget = QWidget()
+        self.previous_button: QPushButton = QPushButton(PREVIOUS_LABEL)
+        self.next_button: QPushButton = QPushButton(NEXT_LABEL)
+        self.page_label: QLabel = QLabel()
+        self.filter_field: QLineEdit = QLineEdit()
+        self.record_count_label: QLabel = QLabel()
+        self.endpoint_label: QLabel = QLabel()
+        self.parameters_label: QLabel = QLabel()
+        super().__init__(result)
+
+    def columns(self) -> tuple[str, ...]:
+        return received_columns(self.result)
+
+    def column_label(self, column: str) -> str:
+        return column.replace("_", " ").capitalize()
+
+    def build_details(self, layout: QVBoxLayout) -> None:
+        return None
+
+    def on_row_selected(self, record: dict[str, str]) -> None:
+        return None
+
+    def build_summary_rows(self, layout: QFormLayout) -> None:
+        super().build_summary_rows(layout)
+        layout.addRow("Endpoint", self.endpoint_label)
+        layout.addRow("Parameters", self.parameters_label)
+        layout.addRow("Records", self.record_count_label)
+
+    def refresh_summary(self) -> None:
+        super().refresh_summary()
+        self.endpoint_label.setText(self.result.endpoint)
+        self.parameters_label.setText(self.result.query_string or "none")
+
+    def fill_content(self) -> None:
+        self._fill_table()
+
+    def build_body(self, layout: QVBoxLayout) -> None:
+        layout.addLayout(self._build_toolbar())
+        layout.addWidget(self.table_widget)
+        layout.addWidget(self._build_pager())
+        self.build_details(layout)
+
+        self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_widget.setAlternatingRowColors(True)
+        self.table_widget.setSortingEnabled(False)
+        self.table_widget.verticalHeader().setVisible(False)
+        self.table_widget.itemSelectionChanged.connect(self._on_selection_changed)
+        header = self.table_widget.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self._on_section_clicked)
 
     def _build_toolbar(self) -> QHBoxLayout:
         toolbar = QHBoxLayout()

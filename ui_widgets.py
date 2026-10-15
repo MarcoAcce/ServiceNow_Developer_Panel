@@ -77,6 +77,14 @@ def script_view(placeholder: str = "") -> QPlainTextEdit:
     return view
 
 
+def script_editor(placeholder: str = "") -> QPlainTextEdit:
+    editor = QPlainTextEdit()
+    editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+    editor.setPlaceholderText(placeholder)
+    set_role(editor, Role.MONOSPACE)
+    return editor
+
+
 def horizontal_rule() -> QFrame:
     rule = QFrame()
     rule.setFrameShape(QFrame.Shape.NoFrame)

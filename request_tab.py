@@ -30,10 +30,21 @@ from query_builder import (
 )
 from request_hints import RequestHintRepository
 from request_types import ANY_VALUE, RequestType
-from response_tab import ResponseTab
+from response_tab import RecordsResponseTab, ResponseTab
 from service import RequestCall, RequestError, RequestResult, RequestService, RequestSpec
 from suggestion_field import SuggestionField
 from tab import Tab
+from table_query_form import (
+    DEFAULT_LIMIT,
+    FIELDS_PLACEHOLDER,
+    MAXIMUM_LIMIT,
+    ORDER_PLACEHOLDER,
+    QUERY_HINT,
+    RECORD_COUNT_HINT,
+    RECORD_COUNT_LABEL,
+    TABLE_LABEL,
+    TABLE_PLACEHOLDER,
+)
 from ui_widgets import (
     hint_label,
     horizontal_rule,
@@ -44,14 +55,6 @@ from ui_widgets import (
     vertical_spacer,
 )
 
-DEFAULT_LIMIT: int = 1000
-MAXIMUM_LIMIT: int = 100000
-SINGLE_CALL_LIMIT: int = 10000
-RECORD_COUNT_LABEL: str = "Number of records"
-RECORD_COUNT_HINT: str = (
-    f"The instance returns at most {SINGLE_CALL_LIMIT} records per call: asking for more than "
-    f"{SINGLE_CALL_LIMIT} splits the request into several calls, which can take a little longer."
-)
 IDLE_MESSAGE: str = "Ready to send through {source}."
 RUNNING_MESSAGE: str = "Sending request..."
 RESULT_MESSAGE: str = "{count} records received in {elapsed} ms."
@@ -60,15 +63,11 @@ ERROR_TITLE: str = "Request failed"
 TABLE_REQUIRED_MESSAGE: str = "Target table is required to send the request."
 REQUIRED_MESSAGE: str = "{label} is required to send the request."
 REQUIRED_SUFFIX: str = " *"
-TABLE_LABEL: str = "Table *"
-TABLE_PLACEHOLDER: str = "Table name, for example incident"
+CLOSE_LABEL: str = "Close"
+EXECUTE_LABEL: str = "Execute"
 TARGET_HINT: str = "The target table is required: the request cannot be sent without it."
 TARGET_LABEL: str = "Target table"
 TARGET_SPACING: int = 8
-QUERY_HINT: str = (
-    "Build the condition like on the instance: AND starts a new group, "
-    "OR adds a condition inside the current group."
-)
 
 
 @dataclass(frozen=True)
@@ -111,22 +110,9 @@ class RequestTab(Tab):
         self._hints: RequestHintRepository = hints
         self.instance_selector: InstanceSelector = InstanceSelector(repository, compact=True)
         self._call: RequestCall | None = None
-        self._filters: list[FilterEntry] = []
-        self._required: list[RequiredEntry] = []
-        self._table_hint: QLineEdit | None = None
-        self._field_hint: QLineEdit | None = None
-        self.table_field: QLineEdit = (
-            QLineEdit(request_type.table)
-            if request_type.table
-            else self.table_suggestion_field()
-        )
-        self.query_builder: QueryBuilder = QueryBuilder()
-        self.fields_field: QLineEdit = QLineEdit()
-        self.order_field: QLineEdit = QLineEdit()
-        self.limit_field: QSpinBox = QSpinBox()
         self.status_label: QLabel = QLabel()
-        self.close_button: QPushButton = QPushButton("Close")
-        self.execute_button: QPushButton = primary_button("Execute")
+        self.close_button: QPushButton = QPushButton(CLOSE_LABEL)
+        self.execute_button: QPushButton = primary_button(EXECUTE_LABEL)
         self._build_ui()
         self._update_execute_state()
         self._show_idle_status()
@@ -148,14 +134,144 @@ class RequestTab(Tab):
             self._call.cancel()
             self._call = None
 
+    def build_content(self) -> QWidget:
+        raise NotImplementedError
+
+    def build_request(self) -> RequestSpec:
+        raise NotImplementedError
+
+    def create_response_tab(self, result: RequestResult) -> ResponseTab:
+        return RecordsResponseTab(result)
+
+    def missing_requirement(self) -> str:
+        return ""
+
+    def record_hints(self) -> None:
+        return None
+
+    def table_names(self) -> list[str]:
+        return self._hints.table_names(self.request_type.key)
+
+    def field_names(self, table: str) -> list[str]:
+        return self._hints.field_names(self.request_type.key, table)
+
+    def record_hint(self, table: str, field: str | None = None) -> None:
+        if table:
+            self._hints.record(self.request_type.key, table, field)
+
+    def refresh_state(self) -> None:
+        self._update_execute_state()
+        if not self.is_running():
+            self._show_idle_status()
+
+    def reload_instances(self) -> None:
+        self.instance_selector.reload()
+
+    def set_instance_id(self, instance_id: int) -> None:
+        self.instance_selector.set_instance_id(instance_id)
+
+    def execute(self) -> None:
+        if self.is_running() or self.missing_requirement():
+            return
+        self.execute_button.setEnabled(False)
+        show_status(self.status_label, RUNNING_MESSAGE)
+        self._call = self._service.send(self.build_request())
+        self._call.succeeded.connect(self._on_succeeded)
+        self._call.failed.connect(self._on_failed)
+        self.runningChanged.emit(True)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.addWidget(title_label(self.request_type.label))
+        root.addWidget(hint_label(self.request_type.description))
+        root.addWidget(horizontal_rule())
+        root.addWidget(self.build_content(), 1)
+        root.addWidget(horizontal_rule())
+        root.addWidget(self.instance_selector)
+        root.addWidget(horizontal_rule())
+        root.addLayout(self._build_footer())
+
+    def _build_footer(self) -> QHBoxLayout:
+        footer = QHBoxLayout()
+        self.status_label.setWordWrap(True)
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        self.execute_button.setDefault(True)
+        self.execute_button.clicked.connect(self.execute)
+        self.close_button.clicked.connect(self._on_close_clicked)
+        footer.addWidget(self.status_label, 1)
+        footer.addWidget(self.close_button)
+        footer.addWidget(self.execute_button)
+        return footer
+
+    def _on_close_clicked(self) -> None:
+        self.cancel()
+        self.closed.emit()
+
+    def _update_execute_state(self) -> None:
+        missing = self.missing_requirement()
+        self.execute_button.setEnabled(not missing and not self.is_running())
+        self.execute_button.setToolTip(missing)
+
+    def _show_idle_status(self) -> None:
+        missing = self.missing_requirement()
+        if missing:
+            show_status(self.status_label, missing)
+            return
+        show_status(self.status_label, IDLE_MESSAGE.format(source=self._service.describe()))
+
+    def _on_succeeded(self, result: RequestResult) -> None:
+        self._release_call()
+        self.record_hints()
+        show_status(
+            self.status_label,
+            RESULT_MESSAGE.format(count=len(result.records), elapsed=result.elapsed_ms),
+        )
+        self.executed.emit(self.create_response_tab(result))
+
+    def _on_failed(self, error: RequestError) -> None:
+        self._release_call()
+        show_status(self.status_label, ERROR_MESSAGE.format(message=error.message), failed=True)
+        show_error(self, ERROR_TITLE, error.message)
+
+    def _release_call(self) -> None:
+        if self._call is not None:
+            self._call.deleteLater()
+            self._call = None
+        self._update_execute_state()
+        self.runningChanged.emit(False)
+
+
+class TableRequestTab(RequestTab):
+
+    def __init__(
+        self,
+        request_type: RequestType,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        self._filters: list[FilterEntry] = []
+        self._required: list[RequiredEntry] = []
+        self._table_hint: QLineEdit | None = None
+        self._field_hint: QLineEdit | None = None
+        self.table_field: QLineEdit = (
+            QLineEdit(request_type.table)
+            if request_type.table
+            else self.table_suggestion_field()
+        )
+        self.query_builder: QueryBuilder = QueryBuilder()
+        self.fields_field: QLineEdit = QLineEdit()
+        self.order_field: QLineEdit = QLineEdit()
+        self.limit_field: QSpinBox = QSpinBox()
+        super().__init__(request_type, service, repository, hints)
+
     def columns(self) -> tuple[str, ...]:
         raise NotImplementedError
 
     def build_filters(self, layout: QFormLayout) -> None:
         return None
-
-    def create_response_tab(self, result: RequestResult) -> ResponseTab:
-        return ResponseTab(result)
 
     def target_table(self) -> str:
         return self.table_field.text().strip()
@@ -171,10 +287,10 @@ class RequestTab(Tab):
         return widget
 
     def table_suggestions(self) -> list[str]:
-        return self._hints.table_names(self.request_type.key)
+        return self.table_names()
 
     def field_suggestions(self) -> list[str]:
-        return self._hints.field_names(self.request_type.key, self.hinted_table())
+        return self.field_names(self.hinted_table())
 
     def hinted_table(self) -> str:
         return self._table_hint.text().strip() if self._table_hint is not None else ""
@@ -193,15 +309,13 @@ class RequestTab(Tab):
                 return entry.message
         return ""
 
+    def record_hints(self) -> None:
+        self.record_hint(self.hinted_table(), self.hinted_field() or None)
+
     def require(self, widget: QWidget, message: str) -> None:
         self._required.append(RequiredEntry(widget=widget, message=message))
         if isinstance(widget, QLineEdit):
             widget.textChanged.connect(self.refresh_state)
-
-    def refresh_state(self) -> None:
-        self._update_execute_state()
-        if not self.is_running():
-            self._show_idle_status()
 
     def filter_conditions(self) -> list[str]:
         conditions: list[str] = []
@@ -305,28 +419,16 @@ class RequestTab(Tab):
     def set_filter_row_visible(self, widget: QWidget, visible: bool) -> None:
         self._filter_layout.setRowVisible(widget, visible)
 
-    def _register_filter(
-        self,
-        field: str,
-        label: str,
-        widget: QWidget,
-        operator: QueryOperator,
-    ) -> None:
-        self._filters.append(FilterEntry(field=field, operator=operator, widget=widget))
-        self.add_filter_row(label, widget)
+    def build_request(self) -> RequestSpec:
+        return RequestSpec(
+            request_type=self.request_type,
+            table=self.target_table(),
+            parameters=self._build_parameters(),
+            columns=self.columns(),
+            target=self.instance_selector.current_target(),
+        )
 
-    def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.addWidget(title_label(self.request_type.label))
-        root.addWidget(hint_label(self.request_type.description))
-        root.addWidget(horizontal_rule())
-        root.addWidget(self._build_content(), 1)
-        root.addWidget(horizontal_rule())
-        root.addWidget(self.instance_selector)
-        root.addWidget(horizontal_rule())
-        root.addLayout(self._build_footer())
-
-    def _build_content(self) -> QScrollArea:
+    def build_content(self) -> QScrollArea:
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -350,6 +452,16 @@ class RequestTab(Tab):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(content)
         return scroll
+
+    def _register_filter(
+        self,
+        field: str,
+        label: str,
+        widget: QWidget,
+        operator: QueryOperator,
+    ) -> None:
+        self._filters.append(FilterEntry(field=field, operator=operator, widget=widget))
+        self.add_filter_row(label, widget)
 
     def _build_target(self) -> QWidget:
         if self.request_type.table:
@@ -390,8 +502,8 @@ class RequestTab(Tab):
         options = QWidget()
         layout = QFormLayout(options)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.fields_field.setPlaceholderText("Comma separated field list, empty for the default columns")
-        self.order_field.setPlaceholderText("Field used to sort the records")
+        self.fields_field.setPlaceholderText(FIELDS_PLACEHOLDER)
+        self.order_field.setPlaceholderText(ORDER_PLACEHOLDER)
         self.limit_field.setRange(1, MAXIMUM_LIMIT)
         self.limit_field.setValue(DEFAULT_LIMIT)
         self.limit_field.setGroupSeparatorShown(True)
@@ -400,59 +512,6 @@ class RequestTab(Tab):
         layout.addRow(RECORD_COUNT_LABEL, self.limit_field)
         layout.addRow(hint_label(RECORD_COUNT_HINT))
         return options
-
-    def _build_footer(self) -> QHBoxLayout:
-        footer = QHBoxLayout()
-        self.status_label.setWordWrap(True)
-        self.status_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        self.execute_button.setDefault(True)
-        self.execute_button.clicked.connect(self.execute)
-        self.close_button.clicked.connect(self._on_close_clicked)
-        footer.addWidget(self.status_label, 1)
-        footer.addWidget(self.close_button)
-        footer.addWidget(self.execute_button)
-        return footer
-
-    def _on_close_clicked(self) -> None:
-        self.cancel()
-        self.closed.emit()
-
-    def _update_execute_state(self) -> None:
-        missing = self.missing_requirement()
-        self.execute_button.setEnabled(not missing and not self.is_running())
-        self.execute_button.setToolTip(missing)
-
-    def execute(self) -> None:
-        if self.is_running() or self.missing_requirement():
-            return
-        self.execute_button.setEnabled(False)
-        show_status(self.status_label, RUNNING_MESSAGE)
-        self._call = self._service.send(self.build_request())
-        self._call.succeeded.connect(self._on_succeeded)
-        self._call.failed.connect(self._on_failed)
-        self.runningChanged.emit(True)
-
-    def _record_hint(self) -> None:
-        table = self.hinted_table()
-        if table:
-            self._hints.record(self.request_type.key, table, self.hinted_field() or None)
-
-    def reload_instances(self) -> None:
-        self.instance_selector.reload()
-
-    def set_instance_id(self, instance_id: int) -> None:
-        self.instance_selector.set_instance_id(instance_id)
-
-    def build_request(self) -> RequestSpec:
-        return RequestSpec(
-            request_type=self.request_type,
-            table=self.target_table(),
-            parameters=self._build_parameters(),
-            columns=self.columns(),
-            target=self.instance_selector.current_target(),
-        )
 
     def _build_parameters(self) -> dict[str, str]:
         parameters: dict[str, str] = {}
@@ -486,31 +545,3 @@ class RequestTab(Tab):
         if isinstance(widget, QSpinBox):
             return str(widget.value())
         return ""
-
-    def _show_idle_status(self) -> None:
-        missing = self.missing_requirement()
-        if missing:
-            show_status(self.status_label, missing)
-            return
-        show_status(self.status_label, IDLE_MESSAGE.format(source=self._service.describe()))
-
-    def _on_succeeded(self, result: RequestResult) -> None:
-        self._release_call()
-        self._record_hint()
-        show_status(
-            self.status_label,
-            RESULT_MESSAGE.format(count=len(result.records), elapsed=result.elapsed_ms),
-        )
-        self.executed.emit(self.create_response_tab(result))
-
-    def _on_failed(self, error: RequestError) -> None:
-        self._release_call()
-        show_status(self.status_label, ERROR_MESSAGE.format(message=error.message), failed=True)
-        show_error(self, ERROR_TITLE, error.message)
-
-    def _release_call(self) -> None:
-        if self._call is not None:
-            self._call.deleteLater()
-            self._call = None
-        self._update_execute_state()
-        self.runningChanged.emit(False)

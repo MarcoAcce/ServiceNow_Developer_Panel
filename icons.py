@@ -13,6 +13,8 @@ REFRESH_ICON: str = "refresh"
 DELETE_ICON: str = "delete"
 ERROR_ICON: str = "error"
 WARNING_ICON: str = "warning"
+EXPAND_ICON: str = "expand"
+COLLAPSE_ICON: str = "collapse"
 
 ICON_PATHS: dict[str, str] = {
     HOME_ICON: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
@@ -42,6 +44,8 @@ ICON_PATHS: dict[str, str] = {
     WARNING_ICON: (
         "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"
     ),
+    EXPAND_ICON: "M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z",
+    COLLAPSE_ICON: "M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z",
 }
 
 SVG_TEMPLATE: str = (
@@ -112,6 +116,12 @@ class IconButton(QPushButton):
         if tone is self._tone:
             return
         self._tone = tone
+        self.refresh_icon()
+
+    def set_name(self, name: str) -> None:
+        if name == self._name:
+            return
+        self._name = name
         self.refresh_icon()
 
     def refresh_icon(self) -> None:

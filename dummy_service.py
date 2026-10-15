@@ -1,6 +1,12 @@
 from PySide6.QtCore import QObject, QTimer
 
-from service import RequestCall, RequestResult, RequestService, RequestSpec
+from service import (
+    CompositeRequestCall,
+    RequestCall,
+    RequestResult,
+    RequestService,
+    RequestSpec,
+)
 
 from request_types import (
     ACL_LIST,
@@ -18,6 +24,7 @@ DUMMY_DELAY_MS: int = 3000
 DUMMY_STATUS_CODE: int = 200
 DUMMY_SOURCE: str = "dummy data"
 PLACEHOLDER_ROW_COUNT: int = 3
+PLACEHOLDER_COLUMNS: tuple[str, ...] = ("sys_id", "name", "sys_updated_on")
 
 
 class DummyRequestCall(RequestCall):
@@ -54,6 +61,8 @@ class DummyRequestService(RequestService):
     name: str = DUMMY_SOURCE
 
     def send(self, request: RequestSpec) -> RequestCall:
+        if request.composite:
+            return CompositeRequestCall(request, self, self)
         return DummyRequestCall(request, self._records_of(request), self)
 
     def describe(self) -> str:
@@ -66,8 +75,9 @@ class DummyRequestService(RequestService):
         return [dict(record) for record in records]
 
     def _placeholder_records(self, request: RequestSpec) -> list[dict[str, str]]:
+        columns = request.columns or PLACEHOLDER_COLUMNS
         return [
-            {column: f"{column} {index + 1}" for column in request.columns}
+            {column: f"{column} {index + 1}" for column in columns}
             for index in range(PLACEHOLDER_ROW_COUNT)
         ]
 

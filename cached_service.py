@@ -73,6 +73,8 @@ class CachedRequestCall(RequestCall):
                     received_at=cached.executed_at.strftime(CACHE_TIME_FORMAT)
                 ),
                 executed_at=cached.executed_at,
+                sections=cached.sections,
+                cache_name=cached.cache_name,
             )
         )
 
@@ -91,8 +93,7 @@ class CachedRequestCall(RequestCall):
         self._release_call()
         if self._cancelled:
             return
-        self._cache.store(result)
-        self.succeeded.emit(result)
+        self.succeeded.emit(self._cache.store(result))
 
     def _on_failed(self, error: RequestError) -> None:
         self._release_call()
@@ -136,8 +137,12 @@ class CachedRequestService(RequestService):
     def lookup(self, request: RequestSpec) -> CachedResponse | None:
         return self._responses.load_cached(request)
 
-    def store(self, result: RequestResult) -> None:
-        task = BackgroundTask(lambda: self._responses.record(result), self)
+    def store(self, result: RequestResult) -> RequestResult:
+        if not result.request.stored:
+            return result
+        stored = self._responses.named(result)
+        task = BackgroundTask(lambda: self._responses.record(stored), self)
         task.finished.connect(task.deleteLater)
         task.failed.connect(task.deleteLater)
         task.start()
+        return stored

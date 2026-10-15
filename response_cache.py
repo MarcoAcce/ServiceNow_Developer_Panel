@@ -2,6 +2,7 @@ import hashlib
 import re
 import sqlite3
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -15,7 +16,14 @@ UNNAMED_PATTERN: re.Pattern[str] = re.compile(r"[^A-Za-z0-9]+")
 DEFAULT_NAME: str = "unnamed"
 DEFAULT_TABLE_NAME: str = "response"
 DEFAULT_COLUMN_NAME: str = "value"
-TABLE_NAME_QUERY: str = "SELECT name FROM sqlite_master WHERE type = 'table' LIMIT 1"
+TABLE_NAMES_QUERY: str = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+
+
+@dataclass(frozen=True)
+class CacheTable:
+    name: str
+    columns: tuple[str, ...]
+    records: list[dict[str, str]]
 
 
 def slug(value: str) -> str:
@@ -36,41 +44,85 @@ def column_names(
     return names if names else (DEFAULT_COLUMN_NAME,)
 
 
+def cache_table(
+    table: str, columns: Sequence[str], records: Sequence[dict[str, str]]
+) -> CacheTable:
+    return CacheTable(
+        name=table.strip() or DEFAULT_TABLE_NAME,
+        columns=column_names(columns, records),
+        records=list(records),
+    )
+
+
 def write_cache(
     name: str, table: str, columns: Sequence[str], records: Sequence[dict[str, str]]
 ) -> Path:
+    return write_cache_tables(name, (cache_table(table, columns, records),))
+
+
+def write_cache_tables(name: str, tables: Sequence[CacheTable]) -> Path:
     path = cache_path(name)
-    table_name = table.strip() or DEFAULT_TABLE_NAME
-    names = column_names(columns, records)
     connection = sqlite3.connect(path)
     try:
         with connection:
-            connection.execute(create_statement(table_name, names))
-            connection.executemany(
-                insert_statement(table_name, names),
-                [tuple(record.get(name, "") for name in names) for record in records],
-            )
+            for table in tables:
+                fill_table(connection, table)
     finally:
         connection.close()
     return path
 
 
-def read_cache(name: str) -> list[dict[str, str]] | None:
-    if not name:
-        return None
-    path = cache_path(name)
-    if not path.is_file():
-        return None
-    connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
+def append_cache_table(name: str, table: CacheTable) -> bool:
+    if not cache_exists(name):
+        return False
+    connection = sqlite3.connect(cache_path(name))
     try:
-        table = connection.execute(TABLE_NAME_QUERY).fetchone()
-        if table is None:
-            return None
-        rows = connection.execute(f"SELECT * FROM {quoted(str(table[0]))}").fetchall()
+        with connection:
+            fill_table(connection, table)
     finally:
         connection.close()
-    return [{column: text_of(row[column]) for column in row.keys()} for row in rows]
+    return True
+
+
+def fill_table(connection: sqlite3.Connection, table: CacheTable) -> None:
+    names = table.columns or (DEFAULT_COLUMN_NAME,)
+    connection.execute(create_statement(table.name, names))
+    connection.executemany(
+        insert_statement(table.name, names),
+        [tuple(record.get(column, "") for column in names) for record in table.records],
+    )
+
+
+def cache_exists(name: str) -> bool:
+    return bool(name) and cache_path(name).is_file()
+
+
+def read_cache(name: str) -> list[dict[str, str]] | None:
+    tables = read_cache_tables(name)
+    if not tables:
+        return None
+    return tables[0].records
+
+
+def read_cache_tables(name: str) -> list[CacheTable] | None:
+    if not cache_exists(name):
+        return None
+    connection = sqlite3.connect(cache_path(name))
+    try:
+        names = [str(row[0]) for row in connection.execute(TABLE_NAMES_QUERY).fetchall()]
+        return [read_table(connection, table_name) for table_name in names]
+    finally:
+        connection.close()
+
+
+def read_table(connection: sqlite3.Connection, name: str) -> CacheTable:
+    cursor = connection.execute(f"SELECT * FROM {quoted(name)}")
+    columns = tuple(str(column[0]) for column in cursor.description or ())
+    records = [
+        {column: text_of(value) for column, value in zip(columns, row)}
+        for row in cursor.fetchall()
+    ]
+    return CacheTable(name=name, columns=columns, records=records)
 
 
 def text_of(value: object) -> str:

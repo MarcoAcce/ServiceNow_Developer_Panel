@@ -22,6 +22,15 @@ TABLE_RECORDS: RequestType = RequestType(
     table="",
     description="Query any table by name and retrieve its records.",
 )
+MULTIPLE_TABLES: RequestType = RequestType(
+    key="multiple_tables",
+    label="Multiple tables",
+    group=GROUP_TABLES,
+    table="",
+    description=(
+        "Request several tables one after the other, then query the cached result with sql."
+    ),
+)
 TABLE_DICTIONARY: RequestType = RequestType(
     key="table_dictionary",
     label="Dictionary entries",
@@ -81,6 +90,7 @@ UI_ACTION_LIST: RequestType = RequestType(
 
 REQUEST_TYPES: tuple[RequestType, ...] = (
     TABLE_RECORDS,
+    MULTIPLE_TABLES,
     TABLE_DICTIONARY,
     ACL_LIST,
     CLIENT_SCRIPT_LIST,

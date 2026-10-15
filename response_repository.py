@@ -1,11 +1,21 @@
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from database_manager import RESPONSE_TIME_FORMAT, DatabaseManager
-from response_cache import cache_name, delete_cache, read_cache, write_cache
-from service import RequestResult, RequestSpec
+from response_cache import (
+    CacheTable,
+    append_cache_table,
+    cache_exists,
+    cache_name,
+    cache_table,
+    delete_cache,
+    read_cache,
+    read_cache_tables,
+    write_cache_tables,
+)
+from service import RequestResult, RequestSpec, ResultSection, part_of
 
 RESPONSE_INSERT: str = (
     "INSERT INTO response "
@@ -22,20 +32,49 @@ MATCH_QUERY: str = (
     "WHERE instance_id = ? AND request_type = ? AND request_details = ? AND received_at > ? "
     "ORDER BY received_at DESC, id DESC LIMIT 1"
 )
+CURRENT_QUERY: str = (
+    "SELECT id FROM response WHERE cache_name = ? AND received_at > ? LIMIT 1"
+)
+DETAILS_UPDATE: str = "UPDATE response SET request_details = ? WHERE cache_name = ?"
 TABLE_KEY: str = "table"
 PARAMETERS_KEY: str = "parameters"
+PARTS_KEY: str = "parts"
 NO_RESPONSE_ID: int = 0
+EXTEND_FAILED_MESSAGE: str = "the local cache of this response cannot be extended"
+
+
+class ResponseCacheError(Exception):
+    pass
 
 
 def request_details(request: RequestSpec) -> str:
-    details = {TABLE_KEY: request.table, PARAMETERS_KEY: request.parameters}
+    details: dict[str, object] = {
+        TABLE_KEY: request.table,
+        PARAMETERS_KEY: request.parameters,
+    }
+    if request.parts:
+        details[PARTS_KEY] = [
+            {TABLE_KEY: part.table, PARAMETERS_KEY: part.parameters}
+            for part in request.parts
+        ]
     return json.dumps(details, separators=(",", ":"), sort_keys=True)
+
+
+def cache_tables_of(result: RequestResult) -> tuple[CacheTable, ...]:
+    if result.sections:
+        return tuple(
+            cache_table(section.table, section.columns, section.records)
+            for section in result.sections
+        )
+    return (cache_table(result.table, result.columns, result.records),)
 
 
 @dataclass(frozen=True)
 class CachedResponse:
     records: list[dict[str, str]]
     executed_at: datetime
+    cache_name: str
+    sections: tuple[ResultSection, ...] = ()
 
 
 class ResponseRepository:
@@ -43,11 +82,18 @@ class ResponseRepository:
     def __init__(self, database: DatabaseManager) -> None:
         self._database: DatabaseManager = database
 
+    def named(self, result: RequestResult) -> RequestResult:
+        instance = result.target.instance
+        if instance is None or result.cache_name:
+            return result
+        name = cache_name(instance.name, result.request_type.key, result.executed_at)
+        return replace(result, cache_name=name)
+
     def record(self, result: RequestResult) -> int:
         instance = result.target.instance
-        if instance is None:
+        name = result.cache_name
+        if instance is None or not name:
             return NO_RESPONSE_ID
-        name = cache_name(instance.name, result.request_type.key, result.executed_at)
         parameters = (
             instance.id,
             result.request_type.key,
@@ -63,7 +109,7 @@ class ResponseRepository:
         response_id = int(self._database.write_and_wait(operation))
         delete_cache(name)
         try:
-            write_cache(name, result.table, result.columns, result.records)
+            write_cache_tables(name, cache_tables_of(result))
         except (OSError, sqlite3.Error):
             self.delete(response_id)
             raise
@@ -84,10 +130,68 @@ class ResponseRepository:
         )
         if row is None:
             return None
-        records = read_cache(str(row["cache_name"]))
+        name = str(row["cache_name"])
+        if request.composite:
+            return self._load_sections(request, name, received_at_of(row))
+        records = read_cache(name)
         if records is None:
             return None
-        return CachedResponse(records=records, executed_at=received_at_of(row))
+        return CachedResponse(
+            records=records, executed_at=received_at_of(row), cache_name=name
+        )
+
+    def is_current(self, result: RequestResult) -> bool:
+        name = result.cache_name
+        if not cache_exists(name):
+            return False
+        row = self._database.query_one(CURRENT_QUERY, (name, self._expiry_cutoff()))
+        return row is not None
+
+    def extend(self, result: RequestResult, section: ResultSection) -> RequestResult:
+        name = result.cache_name
+        table = cache_table(section.table, section.columns, section.records)
+        if not name or not append_cache_table(name, table):
+            raise ResponseCacheError(EXTEND_FAILED_MESSAGE)
+        request = result.request.extended(part_of(section))
+        details = request_details(request)
+
+        def operation(connection: sqlite3.Connection) -> None:
+            connection.execute(DETAILS_UPDATE, (details, name))
+
+        self._database.write_and_wait(operation)
+        return replace(
+            result,
+            request=request,
+            records=result.records + section.records,
+            sections=result.sections + (section,),
+        )
+
+    def _load_sections(
+        self, request: RequestSpec, name: str, executed_at: datetime
+    ) -> CachedResponse | None:
+        tables = read_cache_tables(name)
+        if tables is None:
+            return None
+        cached = {table.name: table for table in tables}
+        sections: list[ResultSection] = []
+        for part in request.parts:
+            table = cached.get(part.table)
+            if table is None:
+                return None
+            sections.append(
+                ResultSection(
+                    table=part.table,
+                    parameters=part.parameters,
+                    columns=table.columns,
+                    records=table.records,
+                )
+            )
+        return CachedResponse(
+            records=[record for section in sections for record in section.records],
+            executed_at=executed_at,
+            cache_name=name,
+            sections=tuple(sections),
+        )
 
     def delete(self, response_id: int) -> None:
         def operation(connection: sqlite3.Connection) -> None:
