@@ -35,6 +35,12 @@ DECISION_ALLOWED: str = "allowed"
 DECISION_CONDITIONAL: str = "conditional"
 DECISION_DENIED: str = "denied"
 DECISION_MISSING: str = "missing"
+DECISION_LABELS: dict[str, str] = {
+    DECISION_ALLOWED: "Allowed",
+    DECISION_CONDITIONAL: "Conditional",
+    DECISION_DENIED: "Denied",
+    DECISION_MISSING: "Unknown",
+}
 
 CONDITION_REQUIREMENT: str = "condition"
 SCRIPT_REQUIREMENT: str = "script"
@@ -43,10 +49,10 @@ BOTH_REQUIREMENT: str = "condition and script"
 AND_LABEL: str = "AND"
 OR_LABEL: str = "OR"
 STAGE_JOINER: str = " -> "
-ITEM_TEMPLATE: str = "{{{title} {detail}}}"
+ITEM_TEMPLATE: str = "{{{title} {reference} {detail}}}"
 REQUIRED_STAGE: str = "{label} requires"
 ALTERNATIVE_STAGE: str = "{label} allows"
-DUPLICATE_TITLE: str = "{title} ({index})"
+PROFILE_SEPARATOR: str = " | "
 
 SINGLE_SUBJECT: str = "The role {roles}"
 MULTIPLE_SUBJECT: str = "The roles {roles}"
@@ -71,9 +77,13 @@ REQUIRED_REASON: str = (
     "{label}: the deny unless control {name} also has to pass its {requirement}."
 )
 ALTERNATIVE_REASON: str = (
-    "{label}: the allow if control {name} grants these roles, subject to its {requirement}."
+    "{label}: the allow if control {name} grants these roles, subject to its "
+    "{requirement}."
 )
 GRANTED_REASON: str = "{label}: the allow if control {name} grants these roles."
+OVERRIDDEN_REASON: str = (
+    "{label}: the admin role overrides the allow if control {name}."
+)
 DENY_ONLY_REASON: str = (
     "{label}: every deny unless control is satisfied and no allow if control is defined."
 )
@@ -92,7 +102,7 @@ class Verification:
     table: str
     operation: str
     field: str = ""
-    roles: tuple[str, ...] = ()
+    profiles: tuple[tuple[str, ...], ...] = ()
 
     @property
     def control_operation(self) -> str:
@@ -113,29 +123,32 @@ class Verification:
         )
 
     @property
-    def role_label(self) -> str:
-        return ROLE_SEPARATOR.join(self.roles)
-
-    @property
-    def subject(self) -> str:
-        template = SINGLE_SUBJECT if len(self.roles) == 1 else MULTIPLE_SUBJECT
-        return template.format(roles=self.role_label)
+    def label(self) -> str:
+        return PROFILE_SEPARATOR.join(
+            ROLE_SEPARATOR.join(profile) for profile in self.profiles
+        )
 
 
 @dataclass(frozen=True)
 class ControlCheck:
     control: AccessControl
     satisfied: bool
+    overridden: bool
     level: str
 
     @property
+    def dynamic(self) -> bool:
+        return self.control.dynamic and not self.overridden
+
+    @property
     def requirement(self) -> str:
-        return requirement_of(self.control)
+        return "" if self.overridden else requirement_of(self.control)
 
 
 @dataclass(frozen=True)
 class FlowNode:
     title: str
+    reference: str
     detail: str
 
 
@@ -162,18 +175,32 @@ class LevelOutcome:
 
 
 @dataclass(frozen=True)
-class VerificationOutcome:
+class ProfileOutcome:
     verification: Verification
+    roles: tuple[str, ...]
     levels: tuple[LevelOutcome, ...]
     decision: str
     stages: tuple[FlowStage, ...]
     text: str
 
     @property
+    def label(self) -> str:
+        return ROLE_SEPARATOR.join(self.roles)
+
+    @property
+    def decision_label(self) -> str:
+        return DECISION_LABELS[self.decision]
+
+    @property
+    def subject(self) -> str:
+        template = SINGLE_SUBJECT if len(self.roles) == 1 else MULTIPLE_SUBJECT
+        return template.format(roles=self.label)
+
+    @property
     def summary(self) -> str:
         return SUMMARIES[self.decision].format(
-            subject=self.verification.subject,
-            subject_lower=self.verification.subject.lower(),
+            subject=self.subject,
+            subject_lower=self.subject.lower(),
             operation=self.verification.operation,
             target=self.verification.target,
         )
@@ -185,6 +212,12 @@ class VerificationOutcome:
     @property
     def checks(self) -> tuple[ControlCheck, ...]:
         return tuple(check for level in self.levels for check in level.checks)
+
+
+@dataclass(frozen=True)
+class VerificationOutcome:
+    verification: Verification
+    profiles: tuple[ProfileOutcome, ...]
 
 
 def level_label(level: str, name: str) -> str:
@@ -201,13 +234,20 @@ def requirement_of(control: AccessControl) -> str:
     return ""
 
 
-def satisfied_by(control: AccessControl, roles: Sequence[str]) -> bool:
-    if not control.roles:
-        return True
+def check_of(
+    control: AccessControl, roles: Sequence[str], level: str
+) -> ControlCheck:
     wanted = {role.strip().lower() for role in roles}
     if control.overrides_admin and ADMIN_ROLE in wanted:
-        return True
-    return bool({role.strip().lower() for role in control.roles} & wanted)
+        return ControlCheck(
+            control=control, satisfied=True, overridden=True, level=level
+        )
+    satisfied = not control.roles or bool(
+        {role.strip().lower() for role in control.roles} & wanted
+    )
+    return ControlCheck(
+        control=control, satisfied=satisfied, overridden=False, level=level
+    )
 
 
 def named(controls: Sequence[AccessControl], name: str) -> tuple[AccessControl, ...]:
@@ -229,10 +269,7 @@ def level_outcome(
         return LevelOutcome(
             level=level, name=name, decision=DECISION_MISSING, reasons=tuple(reasons)
         )
-    checks = tuple(
-        ControlCheck(control=control, satisfied=satisfied_by(control, roles), level=level)
-        for control in controls
-    )
+    checks = tuple(check_of(control, roles, level) for control in controls)
     deny = tuple(check for check in checks if check.control.deny_unless)
     allow = tuple(check for check in checks if not check.control.deny_unless)
     blocked = tuple(check for check in deny if not check.satisfied)
@@ -258,13 +295,9 @@ def level_outcome(
             checks=checks,
             reasons=tuple(reasons),
         )
-    required = tuple(
-        check for check in deny if check.satisfied and check.control.dynamic
-    )
-    certain = tuple(check for check in granted if not check.control.dynamic)
-    alternatives = (
-        () if certain else tuple(check for check in granted if check.control.dynamic)
-    )
+    required = tuple(check for check in deny if check.satisfied and check.dynamic)
+    certain = tuple(check for check in granted if not check.dynamic)
+    alternatives = () if certain else tuple(check for check in granted if check.dynamic)
     reasons.extend(
         REQUIRED_REASON.format(
             label=label, name=check.control.name, requirement=check.requirement
@@ -282,9 +315,8 @@ def level_outcome(
     else:
         decision = DECISION_ALLOWED
         if certain:
-            reasons.append(
-                GRANTED_REASON.format(label=label, name=certain[0].control.name)
-            )
+            template = OVERRIDDEN_REASON if certain[0].overridden else GRANTED_REASON
+            reasons.append(template.format(label=label, name=certain[0].control.name))
         else:
             reasons.append(DENY_ONLY_REASON.format(label=label))
     return LevelOutcome(
@@ -299,33 +331,30 @@ def level_outcome(
 
 
 def record_outcome(
-    verification: Verification, controls: Sequence[AccessControl]
+    verification: Verification,
+    controls: Sequence[AccessControl],
+    roles: Sequence[str],
 ) -> LevelOutcome:
     return level_outcome(
-        RECORD_LEVEL,
-        verification.table,
-        named(controls, verification.table),
-        verification.roles,
+        RECORD_LEVEL, verification.table, named(controls, verification.table), roles
     )
 
 
 def field_outcome(
-    verification: Verification, controls: Sequence[AccessControl]
+    verification: Verification,
+    controls: Sequence[AccessControl],
+    roles: Sequence[str],
 ) -> LevelOutcome:
     name = field_control_name(verification.table, verification.field)
     matching = named(controls, name)
     if matching:
-        return level_outcome(FIELD_LEVEL, name, matching, verification.roles)
+        return level_outcome(FIELD_LEVEL, name, matching, roles)
     wildcard = wildcard_name(verification.table)
     matching = named(controls, wildcard)
     if not matching:
-        return level_outcome(FIELD_LEVEL, name, (), verification.roles)
-    note = WILDCARD_REASON.format(
-        label=level_label(FIELD_LEVEL, wildcard), name=name
-    )
-    return level_outcome(
-        FIELD_LEVEL, wildcard, matching, verification.roles, (note,)
-    )
+        return level_outcome(FIELD_LEVEL, name, (), roles)
+    note = WILDCARD_REASON.format(label=level_label(FIELD_LEVEL, wildcard), name=name)
+    return level_outcome(FIELD_LEVEL, wildcard, matching, roles, (note,))
 
 
 def overall_decision(levels: Sequence[LevelOutcome]) -> str:
@@ -339,35 +368,16 @@ def overall_decision(levels: Sequence[LevelOutcome]) -> str:
     return DECISION_ALLOWED
 
 
-def numbered(stages: Sequence[FlowStage]) -> tuple[FlowStage, ...]:
-    counted: dict[str, int] = {}
-    for stage in stages:
-        for node in stage.nodes:
-            counted[node.title] = counted.get(node.title, 0) + 1
-    seen: dict[str, int] = {}
-    renamed: list[FlowStage] = []
-    for stage in stages:
-        nodes: list[FlowNode] = []
-        for node in stage.nodes:
-            if counted[node.title] < 2:
-                nodes.append(node)
-                continue
-            index = seen.get(node.title, 0) + 1
-            seen[node.title] = index
-            title = DUPLICATE_TITLE.format(title=node.title, index=index)
-            nodes.append(FlowNode(title=title, detail=node.detail))
-        renamed.append(
-            FlowStage(title=stage.title, joiner=stage.joiner, nodes=tuple(nodes))
-        )
-    return tuple(renamed)
-
-
 def stage_of(title: str, joiner: str, checks: Sequence[ControlCheck]) -> FlowStage:
     return FlowStage(
         title=title,
         joiner=joiner,
         nodes=tuple(
-            FlowNode(title=check.control.name, detail=check.requirement)
+            FlowNode(
+                title=check.control.name,
+                reference=check.control.sys_id,
+                detail=check.requirement,
+            )
             for check in checks
         ),
     )
@@ -390,16 +400,38 @@ def flow_stages(levels: Sequence[LevelOutcome]) -> tuple[FlowStage, ...]:
                     level.alternatives,
                 )
             )
-    return numbered(stages)
+    return tuple(stages)
 
 
 def flow_text(stages: Sequence[FlowStage]) -> str:
     return STAGE_JOINER.join(
         f" {stage.joiner} ".join(
-            ITEM_TEMPLATE.format(title=node.title, detail=node.detail)
+            ITEM_TEMPLATE.format(
+                title=node.title, reference=node.reference, detail=node.detail
+            )
             for node in stage.nodes
         )
         for stage in stages
+    )
+
+
+def profile_outcome(
+    verification: Verification,
+    controls: Sequence[AccessControl],
+    roles: tuple[str, ...],
+) -> ProfileOutcome:
+    levels = [record_outcome(verification, controls, roles)]
+    if verification.field:
+        levels.append(field_outcome(verification, controls, roles))
+    decision = overall_decision(levels)
+    stages = () if decision == DECISION_DENIED else flow_stages(levels)
+    return ProfileOutcome(
+        verification=verification,
+        roles=roles,
+        levels=tuple(levels),
+        decision=decision,
+        stages=stages,
+        text=flow_text(stages),
     )
 
 
@@ -411,15 +443,10 @@ def evaluate(
         for control in controls
         if control.is_active and control.operation == verification.control_operation
     )
-    levels = [record_outcome(verification, active)]
-    if verification.field:
-        levels.append(field_outcome(verification, active))
-    decision = overall_decision(levels)
-    stages = () if decision == DECISION_DENIED else flow_stages(levels)
     return VerificationOutcome(
         verification=verification,
-        levels=tuple(levels),
-        decision=decision,
-        stages=stages,
-        text=flow_text(stages),
+        profiles=tuple(
+            profile_outcome(verification, active, roles)
+            for roles in verification.profiles
+        ),
     )

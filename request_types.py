@@ -51,7 +51,7 @@ VERIFY_SECURITY: RequestType = RequestType(
     group=GROUP_SECURITY,
     table="sys_security_acl",
     description=(
-        "Check whether a set of roles can run an operation on a table or a field."
+        "Check which users, by their roles, can run an operation on a table or a field."
     ),
 )
 CLIENT_SCRIPT_LIST: RequestType = RequestType(

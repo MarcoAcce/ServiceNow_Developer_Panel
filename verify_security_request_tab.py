@@ -19,7 +19,7 @@ from request_hints import RequestHintRepository
 from request_tab import RequestTab, required_label, required_message
 from request_types import VERIFY_SECURITY
 from response_tab import ResponseTab
-from role_field import RoleListField
+from role_field import UserRoleField
 from service import (
     LIMIT_PARAMETER,
     ORDER_PARAMETER,
@@ -47,13 +47,14 @@ FIELD_HINT: str = (
     "A field can only be named for read and update: the other operations are decided "
     "at the record level alone."
 )
-ROLES_SECTION: str = "Roles to check"
+ROLES_SECTION: str = "Users to check"
 ROLES_HINT: str = (
-    "The roles are compared with the roles of every control on this machine: they are "
-    "never sent to the instance."
+    "Every user is checked with the whole set of roles listed under it, and the admin "
+    "role satisfies the controls that let the admin role override them. The roles are "
+    "compared on this machine and are never sent to the instance."
 )
 TABLE_REQUIRED: str = required_message(TABLE_LABEL)
-ROLES_REQUIRED: str = "At least one role is required to verify the access controls."
+ROLES_REQUIRED: str = "At least one user with one role is required to verify the controls."
 
 
 class VerifySecurityRequestTab(RequestTab):
@@ -68,7 +69,7 @@ class VerifySecurityRequestTab(RequestTab):
         self.table_field: SuggestionField = SuggestionField(self.table_names)
         self.operation_field: RadioChoiceField = RadioChoiceField(OPERATIONS)
         self.field_field: SuggestionField = SuggestionField(self._field_suggestions)
-        self.roles_field: RoleListField = RoleListField()
+        self.roles_field: UserRoleField = UserRoleField()
         super().__init__(VERIFY_SECURITY, service, repository, hints)
         self._apply_operation()
 
@@ -91,13 +92,13 @@ class VerifySecurityRequestTab(RequestTab):
             table=self.target_table(),
             operation=self.operation(),
             field=self.protected_field(),
-            roles=self.roles_field.roles(),
+            profiles=self.roles_field.profiles(),
         )
 
     def missing_requirement(self) -> str:
         if not self.target_table():
             return TABLE_REQUIRED
-        if not self.roles_field.roles():
+        if not self.roles_field.profiles():
             return ROLES_REQUIRED
         return ""
 
