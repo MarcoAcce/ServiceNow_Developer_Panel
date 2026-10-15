@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QWidget
 from acl_verification import FlowNode, FlowStage
 from theme import Color, current_theme
 
-NODE_WIDTH: int = 190
+NODE_WIDTH: int = 270
 NODE_PADDING: int = 8
 NODE_SPACING: int = 30
 STAGE_SPACING: int = 54
@@ -20,10 +20,15 @@ LINE_WIDTH: int = 1
 ARROW_LENGTH: int = 9
 ARROW_WIDTH: int = 5
 ARROW_MARGIN: int = 5
+REFERENCE_POINT_SIZE_DELTA: int = -1
+MINIMUM_POINT_SIZE: int = 6
 EMPTY_WIDTH: int = 2 * NODE_WIDTH
 EMPTY_TEXT: str = "No dynamic condition or script has to be evaluated."
 TEXT_FLAGS: Qt.TextFlag = Qt.TextFlag.TextWordWrap
 CENTER_FLAGS: int = int(Qt.AlignmentFlag.AlignCenter) | int(TEXT_FLAGS)
+REFERENCE_FLAGS: int = int(Qt.AlignmentFlag.AlignCenter) | int(
+    Qt.TextFlag.TextWrapAnywhere
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,7 @@ class NodeBox:
     node: FlowNode
     rect: QRect
     title_rect: QRect
+    reference_rect: QRect
     detail_rect: QRect
 
 
@@ -52,23 +58,40 @@ def bold_of(font: QFont) -> QFont:
     return bold
 
 
-def wrapped_height(metrics: QFontMetrics, text: str, width: int) -> int:
+def small_of(font: QFont) -> QFont:
+    small = QFont(font)
+    small.setPointSize(
+        max(MINIMUM_POINT_SIZE, font.pointSize() + REFERENCE_POINT_SIZE_DELTA)
+    )
+    return small
+
+
+def wrapped_height(
+    metrics: QFontMetrics, text: str, width: int, flags: int = CENTER_FLAGS
+) -> int:
     if not text:
         return 0
-    return metrics.boundingRect(QRect(0, 0, width, 0), TEXT_FLAGS, text).height()
+    return metrics.boundingRect(QRect(0, 0, width, 0), flags, text).height()
 
 
 def node_heights(
-    nodes: Sequence[FlowNode], title: QFontMetrics, detail: QFontMetrics, width: int
-) -> list[tuple[int, int, int]]:
-    heights: list[tuple[int, int, int]] = []
+    nodes: Sequence[FlowNode],
+    title: QFontMetrics,
+    reference: QFontMetrics,
+    detail: QFontMetrics,
+    width: int,
+) -> list[tuple[int, int, int, int]]:
+    heights: list[tuple[int, int, int, int]] = []
     for node in nodes:
         title_height = wrapped_height(title, node.title, width)
+        reference_height = wrapped_height(
+            reference, node.reference, width, REFERENCE_FLAGS
+        )
         detail_height = wrapped_height(detail, node.detail, width)
-        total = title_height + detail_height + 2 * NODE_PADDING
-        if title_height and detail_height:
-            total += TEXT_SPACING
-        heights.append((total, title_height, detail_height))
+        lines = [title_height, reference_height, detail_height]
+        total = sum(lines) + 2 * NODE_PADDING
+        total += TEXT_SPACING * max(0, len([line for line in lines if line]) - 1)
+        heights.append((total, title_height, reference_height, detail_height))
     return heights
 
 
@@ -77,16 +100,19 @@ def layout_stages(
 ) -> tuple[tuple[StageBox, ...], QSize]:
     detail_metrics = QFontMetrics(font)
     title_metrics = QFontMetrics(bold_of(font))
+    reference_metrics = QFontMetrics(small_of(font))
     text_width = NODE_WIDTH - 2 * NODE_PADDING
     if not stages:
         height = wrapped_height(detail_metrics, EMPTY_TEXT, EMPTY_WIDTH)
         return (), QSize(EMPTY_WIDTH + 2 * MARGIN, height + 2 * MARGIN)
     measures = [
-        node_heights(stage.nodes, title_metrics, detail_metrics, text_width)
+        node_heights(
+            stage.nodes, title_metrics, reference_metrics, detail_metrics, text_width
+        )
         for stage in stages
     ]
     columns = [
-        sum(height for height, _, _ in measure) + NODE_SPACING * (len(measure) - 1)
+        sum(height for height, _, _, _ in measure) + NODE_SPACING * (len(measure) - 1)
         for measure in measures
     ]
     titles = [
@@ -100,24 +126,22 @@ def layout_stages(
         top = MARGIN + title_band + TITLE_SPACING
         offset = top + (body_height - columns[index]) // 2
         nodes: list[NodeBox] = []
-        for node, (height, title_height, detail_height) in zip(
-            stage.nodes, measures[index]
-        ):
-            rect = QRect(left, offset, NODE_WIDTH, height)
-            title_rect = QRect(
-                left + NODE_PADDING, offset + NODE_PADDING, text_width, title_height
+        for node, measure in zip(stage.nodes, measures[index]):
+            height, title_height, reference_height, detail_height = measure
+            line = offset + NODE_PADDING
+            title_rect = QRect(left + NODE_PADDING, line, text_width, title_height)
+            line = title_rect.bottom() + TEXT_SPACING
+            reference_rect = QRect(
+                left + NODE_PADDING, line, text_width, reference_height
             )
-            detail_rect = QRect(
-                left + NODE_PADDING,
-                title_rect.bottom() + TEXT_SPACING,
-                text_width,
-                detail_height,
-            )
+            line = reference_rect.bottom() + TEXT_SPACING
+            detail_rect = QRect(left + NODE_PADDING, line, text_width, detail_height)
             nodes.append(
                 NodeBox(
                     node=node,
-                    rect=rect,
+                    rect=QRect(left, offset, NODE_WIDTH, height),
                     title_rect=title_rect,
+                    reference_rect=reference_rect,
                     detail_rect=detail_rect,
                 )
             )
@@ -125,7 +149,9 @@ def layout_stages(
         boxes.append(
             StageBox(
                 stage=stage,
-                rect=QRect(left, MARGIN, NODE_WIDTH, title_band + TITLE_SPACING + body_height),
+                rect=QRect(
+                    left, MARGIN, NODE_WIDTH, title_band + TITLE_SPACING + body_height
+                ),
                 title_rect=QRect(left, MARGIN, NODE_WIDTH, title_band),
                 boxes=tuple(nodes),
             )
@@ -200,6 +226,9 @@ class FlowGraph(QWidget):
             painter.setFont(bold_of(font))
             painter.setPen(color_of(theme.text_primary))
             painter.drawText(box.title_rect, CENTER_FLAGS, box.node.title)
+            painter.setFont(small_of(font))
+            painter.setPen(color_of(theme.text_disabled))
+            painter.drawText(box.reference_rect, REFERENCE_FLAGS, box.node.reference)
             painter.setFont(font)
             painter.setPen(color_of(theme.text_secondary))
             painter.drawText(box.detail_rect, CENTER_FLAGS, box.node.detail)

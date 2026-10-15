@@ -3,9 +3,9 @@ from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout
 from acl_controls import (
     COLUMN_LABELS,
     EXPORT_COLUMNS,
+    GRID_CHECKBOX_COLUMNS,
     GRID_COLUMNS,
     NAME_FIELD,
-    SCRIPT_FLAG_COLUMN,
     controls_of,
     display_records,
     section_records,
@@ -75,7 +75,7 @@ class AclResponseTab(ScriptResponseTab):
         return GRID_COLUMNS
 
     def checkbox_columns(self) -> tuple[str, ...]:
-        return (SCRIPT_FLAG_COLUMN,)
+        return GRID_CHECKBOX_COLUMNS
 
     def export_columns(self) -> tuple[str, ...]:
         return EXPORT_COLUMNS
