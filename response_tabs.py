@@ -37,7 +37,7 @@ class ScriptResponseTab(ResponseTab):
         layout.addWidget(self.script_preview)
 
     def columns(self) -> tuple[str, ...]:
-        return tuple(column for column in self.result.columns if column != self.script_field)
+        return tuple(column for column in super().columns() if column != self.script_field)
 
     def on_row_selected(self, record: dict[str, str]) -> None:
         self.script_preview.setPlainText(record.get(self.script_field, ""))

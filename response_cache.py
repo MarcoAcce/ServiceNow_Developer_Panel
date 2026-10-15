@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app_paths import cache_directory, cache_path
+from record_columns import ordered_columns
 
 CACHE_SUFFIX: str = ".db"
 NAME_SEPARATOR: str = "_"
@@ -31,11 +32,8 @@ def cache_name(instance: str, request_type: str, executed_at: datetime) -> str:
 def column_names(
     columns: Sequence[str], records: Sequence[dict[str, str]]
 ) -> tuple[str, ...]:
-    names: list[str] = []
-    for name in list(columns) + [key for record in records for key in record]:
-        if name and name not in names:
-            names.append(name)
-    return tuple(names) if names else (DEFAULT_COLUMN_NAME,)
+    names = ordered_columns(columns, records)
+    return names if names else (DEFAULT_COLUMN_NAME,)
 
 
 def write_cache(

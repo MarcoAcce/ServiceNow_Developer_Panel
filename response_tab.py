@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from icons import REFRESH_ICON, IconButton
+from record_columns import ordered_columns
 from service import RequestResult
 from tab import Tab
 from ui_widgets import (
@@ -39,6 +40,18 @@ REFRESH_ERROR_MESSAGE: str = "Refresh failed: {message}"
 ADDRESS_SEPARATOR: str = " - "
 TABLE_NAME_LIMIT: int = 24
 INSTANCE_NAME_LIMIT: int = 18
+PAGE_SIZE: int = 100
+PREVIOUS_LABEL: str = "Previous"
+NEXT_LABEL: str = "Next"
+PAGE_TEXT: str = "Page {page} of {pages}"
+RANGE_TEXT: str = "{start} to {end} of {count}"
+MATCHING_TEXT: str = "{start} to {end} of {matching} matching, {total} received"
+NO_MATCH_TEXT: str = "0 of {total}"
+PAGER_SPACING: int = 8
+
+
+def received_columns(result: RequestResult) -> tuple[str, ...]:
+    return ordered_columns(result.columns, result.records) or result.columns
 
 
 class ResponseTab(Tab):
@@ -52,7 +65,16 @@ class ResponseTab(Tab):
         self._menu_detail: str = self.build_menu_detail(result)
         self._menu_tooltip: str = self.build_menu_tooltip(result)
         self._refreshing: bool = False
+        self._columns: tuple[str, ...] = ()
+        self._filtered: list[int] = []
+        self._page: int = 0
+        self._sort_column: int = -1
+        self._sort_order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
         self.table_widget: QTableWidget = QTableWidget()
+        self.pager: QWidget = QWidget()
+        self.previous_button: QPushButton = QPushButton(PREVIOUS_LABEL)
+        self.next_button: QPushButton = QPushButton(NEXT_LABEL)
+        self.page_label: QLabel = QLabel()
         self.filter_field: QLineEdit = QLineEdit()
         self.record_count_label: QLabel = QLabel()
         self.title_hint_label: QLabel = hint_label("")
@@ -106,7 +128,7 @@ class ResponseTab(Tab):
         return "\n".join(line for line in lines if line)
 
     def columns(self) -> tuple[str, ...]:
-        return self.result.columns
+        return received_columns(self.result)
 
     def column_label(self, column: str) -> str:
         return column.replace("_", " ").capitalize()
@@ -128,7 +150,6 @@ class ResponseTab(Tab):
         self.set_refreshing(False)
         self._refresh_summary()
         self._fill_table()
-        self._apply_filter(self.filter_field.text())
         self.result_updated()
         self.menu_title = self.build_menu_title(result)
 
@@ -155,15 +176,19 @@ class ResponseTab(Tab):
         root.addWidget(horizontal_rule())
         root.addLayout(self._build_toolbar())
         root.addWidget(self.table_widget)
+        root.addWidget(self._build_pager())
         self.build_details(root)
 
         self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_widget.setAlternatingRowColors(True)
-        self.table_widget.setSortingEnabled(True)
+        self.table_widget.setSortingEnabled(False)
         self.table_widget.verticalHeader().setVisible(False)
         self.table_widget.itemSelectionChanged.connect(self._on_selection_changed)
+        header = self.table_widget.horizontalHeader()
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self._on_section_clicked)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -220,48 +245,132 @@ class ResponseTab(Tab):
         toolbar.addWidget(save_button)
         return toolbar
 
+    def _build_pager(self) -> QWidget:
+        layout = QHBoxLayout(self.pager)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(PAGER_SPACING)
+        self.previous_button.clicked.connect(self._on_previous_page)
+        self.next_button.clicked.connect(self._on_next_page)
+        layout.addStretch(1)
+        layout.addWidget(self.previous_button)
+        layout.addWidget(self.page_label)
+        layout.addWidget(self.next_button)
+        return self.pager
+
     def _fill_table(self) -> None:
-        columns = self.columns()
-        records = self.result.records
-        self.table_widget.setSortingEnabled(False)
+        self._columns = self.columns()
+        self._sort_column = -1
+        self._sort_order = Qt.SortOrder.AscendingOrder
         self.table_widget.clearContents()
-        self.table_widget.setColumnCount(len(columns))
-        self.table_widget.setRowCount(len(records))
-        self.table_widget.setHorizontalHeaderLabels([self.column_label(column) for column in columns])
-        for row, record in enumerate(records):
-            for column_index, column in enumerate(columns):
-                item = QTableWidgetItem(record.get(column, ""))
-                item.setData(Qt.ItemDataRole.UserRole, row)
-                self.table_widget.setItem(row, column_index, item)
-        self.table_widget.setSortingEnabled(True)
+        self.table_widget.setColumnCount(len(self._columns))
+        self.table_widget.setHorizontalHeaderLabels(
+            [self.column_label(column) for column in self._columns]
+        )
         header = self.table_widget.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
-        self.table_widget.resizeColumnsToContents()
-        self._update_record_count(len(records))
-
-    def _update_record_count(self, visible: int) -> None:
-        total = len(self.result.records)
-        if visible == total:
-            self.record_count_label.setText(str(total))
-        else:
-            self.record_count_label.setText(f"{visible} of {total}")
+        header.setSortIndicatorShown(False)
+        self._apply_filter(self.filter_field.text())
 
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
-        visible = 0
-        for row in range(self.table_widget.rowCount()):
-            matches = not needle or self._row_matches(row, needle)
-            self.table_widget.setRowHidden(row, not matches)
-            visible += int(matches)
-        self._update_record_count(visible)
+        records = self.result.records
+        if needle:
+            self._filtered = [
+                index
+                for index, record in enumerate(records)
+                if self._record_matches(record, needle)
+            ]
+        else:
+            self._filtered = list(range(len(records)))
+        self._sort_filtered()
+        self._page = 0
+        self._fill_page()
 
-    def _row_matches(self, row: int, needle: str) -> bool:
-        for column in range(self.table_widget.columnCount()):
-            item = self.table_widget.item(row, column)
-            if item is not None and needle in item.text().lower():
-                return True
-        return False
+    def _record_matches(self, record: dict[str, str], needle: str) -> bool:
+        return any(needle in record.get(column, "").lower() for column in self._columns)
+
+    def _sort_filtered(self) -> None:
+        if not 0 <= self._sort_column < len(self._columns):
+            return
+        column = self._columns[self._sort_column]
+        records = self.result.records
+        self._filtered.sort(
+            key=lambda index: records[index].get(column, "").lower(),
+            reverse=self._sort_order == Qt.SortOrder.DescendingOrder,
+        )
+
+    def _fill_page(self) -> None:
+        records = self.result.records
+        indexes = self._page_indexes()
+        self.table_widget.clearContents()
+        self.table_widget.setRowCount(len(indexes))
+        for row, index in enumerate(indexes):
+            record = records[index]
+            for column_index, column in enumerate(self._columns):
+                item = QTableWidgetItem(record.get(column, ""))
+                item.setData(Qt.ItemDataRole.UserRole, index)
+                self.table_widget.setItem(row, column_index, item)
+        self.table_widget.resizeColumnsToContents()
+        self._update_pager()
+        self._update_record_count()
+
+    def _page_indexes(self) -> list[int]:
+        start = self._page * PAGE_SIZE
+        return self._filtered[start : start + PAGE_SIZE]
+
+    def _page_count(self) -> int:
+        return max(1, (len(self._filtered) + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    def _update_pager(self) -> None:
+        pages = self._page_count()
+        self.pager.setVisible(len(self._filtered) > PAGE_SIZE)
+        self.page_label.setText(PAGE_TEXT.format(page=self._page + 1, pages=pages))
+        self.previous_button.setEnabled(self._page > 0)
+        self.next_button.setEnabled(self._page + 1 < pages)
+
+    def _update_record_count(self) -> None:
+        total = len(self.result.records)
+        matching = len(self._filtered)
+        if not matching:
+            self.record_count_label.setText(NO_MATCH_TEXT.format(total=total))
+            return
+        start = self._page * PAGE_SIZE + 1
+        end = min(start + PAGE_SIZE - 1, matching)
+        if matching != total:
+            text = MATCHING_TEXT.format(start=start, end=end, matching=matching, total=total)
+        elif matching <= PAGE_SIZE:
+            text = str(total)
+        else:
+            text = RANGE_TEXT.format(start=start, end=end, count=total)
+        self.record_count_label.setText(text)
+
+    def _on_previous_page(self) -> None:
+        if self._page > 0:
+            self._page -= 1
+            self._fill_page()
+
+    def _on_next_page(self) -> None:
+        if self._page + 1 < self._page_count():
+            self._page += 1
+            self._fill_page()
+
+    def _on_section_clicked(self, index: int) -> None:
+        if index == self._sort_column:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._sort_column = index
+            self._sort_order = Qt.SortOrder.AscendingOrder
+        header = self.table_widget.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(self._sort_column, self._sort_order)
+        self._sort_filtered()
+        self._page = 0
+        self._fill_page()
 
     def _selected_record(self) -> dict[str, str] | None:
         items = self.table_widget.selectedItems()
@@ -282,7 +391,7 @@ class ResponseTab(Tab):
         path, _ = QFileDialog.getSaveFileName(self, "Save response", suggestion, "CSV files (*.csv)")
         if not path:
             return
-        columns = self.columns()
+        columns = received_columns(self.result)
         try:
             with Path(path).open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=list(columns), extrasaction="ignore")

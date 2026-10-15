@@ -15,6 +15,8 @@ from config_repository import Authentication, Instance
 from request_types import RequestType
 
 TABLE_API_PATH: str = "/api/now/table"
+LIMIT_PARAMETER: str = "sysparm_limit"
+OFFSET_PARAMETER: str = "sysparm_offset"
 NO_INSTANCE_LABEL: str = "no instance"
 NO_AUTHENTICATION_LABEL: str = "no active authentication method"
 DEFAULT_SCHEME: str = "https://"
@@ -156,7 +158,9 @@ def authentication_header(authentication: Authentication) -> str:
     )
 
 
-def prepare_request(request: RequestSpec) -> PreparedRequest:
+def prepare_request(
+    request: RequestSpec, overrides: dict[str, str] | None = None
+) -> PreparedRequest:
     instance = request.target.instance
     authentication = request.target.authentication
     if instance is None:
@@ -165,7 +169,9 @@ def prepare_request(request: RequestSpec) -> PreparedRequest:
         raise ServiceConfigurationError(MISSING_AUTHENTICATION_MESSAGE)
     headers = dict(DEFAULT_HEADERS)
     headers[AUTHORIZATION_HEADER] = authentication_header(authentication)
-    query = urlencode(request.parameters)
+    parameters = dict(request.parameters)
+    parameters.update(overrides or {})
+    query = urlencode(parameters)
     url = f"{instance_url(instance.address)}{request.path}"
     return PreparedRequest(url=f"{url}?{query}" if query else url, headers=headers)
 
