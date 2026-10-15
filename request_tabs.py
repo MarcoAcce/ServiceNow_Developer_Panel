@@ -1,5 +1,13 @@
 from PySide6.QtWidgets import QFormLayout, QLabel
 
+from acl_requests import (
+    ACL_FIELDS,
+    NAME_FIELD,
+    OPERATION_NAME_FIELD,
+    acl_composite,
+    field_control_name,
+    wildcard_name,
+)
 from config_repository import ConfigRepository
 from filter_fields import RadioChoiceField
 from request_hints import RequestHintRepository
@@ -19,6 +27,7 @@ from request_types import (
     TABLE_RECORDS,
     UI_ACTION_LIST,
     UI_POLICY_LIST,
+    VERIFY_SECURITY,
 )
 from response_tab import ResponseTab
 from response_tabs import (
@@ -32,11 +41,19 @@ from response_tabs import (
     UiActionResponseTab,
     UiPolicyResponseTab,
 )
-from service import RequestResult, RequestService
+from service import RequestResult, RequestService, RequestSpec
 from ui_widgets import hint_label
+from verify_security_request_tab import VerifySecurityRequestTab
 
 ACTIVE_OPTIONS: tuple[str, ...] = ("true", "false")
-ACL_OPERATIONS: tuple[str, ...] = ("read", "write", "create", "delete", "report_on")
+ACL_OPERATIONS: tuple[str, ...] = (
+    "read",
+    "write",
+    "create",
+    "delete",
+    "execute",
+    "report_on",
+)
 ACL_TYPES: tuple[str, ...] = ("record", "client_callable_script_include", "processor", "ui_page")
 CLIENT_SCRIPT_TYPES: tuple[str, ...] = ("onLoad", "onChange", "onSubmit", "onCellEdit")
 CLIENT_SCRIPT_UI_TYPES: tuple[str, ...] = ("Desktop", "Mobile", "Both")
@@ -58,8 +75,6 @@ ACL_SCOPE_HINTS: dict[str, str] = {
     ACL_SCOPE_WILDCARD: "Controls covering every field of the table, for example incident.*.",
     ACL_SCOPE_FIELD: "Controls covering a single field, for example incident.state.",
 }
-ACL_NAME_FIELD: str = "name"
-ACL_WILDCARD_SUFFIX: str = ".*"
 ACL_SCOPE_LABEL: str = "ACL protects"
 ACL_TABLE_LABEL: str = "Table protected by the ACL"
 ACL_FIELD_LABEL: str = "Field protected by the ACL"
@@ -113,6 +128,8 @@ class DictionaryRequestTab(TableRequestTab):
 
 class AclRequestTab(TableRequestTab):
 
+    fields_option: bool = False
+
     def __init__(
         self,
         service: RequestService,
@@ -122,7 +139,7 @@ class AclRequestTab(TableRequestTab):
         super().__init__(ACL_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
-        return ("name", "operation", "admin_overrides", "active", "description", "script")
+        return ACL_FIELDS
 
     def build_filters(self, layout: QFormLayout) -> None:
         self.scope_field: RadioChoiceField = RadioChoiceField(ACL_SCOPES)
@@ -135,7 +152,7 @@ class AclRequestTab(TableRequestTab):
         self.add_filter_row("", self.scope_hint)
         self.add_filter_row(required_label(ACL_TABLE_LABEL), self.acl_table_field)
         self.add_filter_row(required_label(ACL_FIELD_LABEL), self.acl_field_field)
-        self.add_choice_filter("operation", "Operation", ACL_OPERATIONS)
+        self.add_choice_filter(OPERATION_NAME_FIELD, "Operation", ACL_OPERATIONS)
         self.add_choice_filter("type", "Type", ACL_TYPES)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
         self.scope_field.changed.connect(self._on_scope_changed)
@@ -158,10 +175,10 @@ class AclRequestTab(TableRequestTab):
             return ""
         scope = self.scope()
         if scope == ACL_SCOPE_WILDCARD:
-            return f"{table}{ACL_WILDCARD_SUFFIX}"
+            return wildcard_name(table)
         if scope == ACL_SCOPE_FIELD:
             field = self.protected_field()
-            return f"{table}.{field}" if field else ""
+            return field_control_name(table, field) if field else ""
         return table
 
     def missing_requirement(self) -> str:
@@ -176,8 +193,11 @@ class AclRequestTab(TableRequestTab):
         conditions = super().filter_conditions()
         name = self.acl_name()
         if name:
-            conditions.insert(0, build_condition(ACL_NAME_FIELD, OPERATOR_IS, name))
+            conditions.insert(0, build_condition(NAME_FIELD, OPERATOR_IS, name))
         return conditions
+
+    def build_request(self) -> RequestSpec:
+        return acl_composite(super().build_request(), (self.acl_name(),))
 
     def create_response_tab(self, result: RequestResult) -> ResponseTab:
         return AclResponseTab(result)
@@ -342,6 +362,7 @@ REQUEST_TAB_CLASSES: dict[str, type[RequestTab]] = {
     MULTIPLE_TABLES.key: MultipleTablesRequestTab,
     TABLE_DICTIONARY.key: DictionaryRequestTab,
     ACL_LIST.key: AclRequestTab,
+    VERIFY_SECURITY.key: VerifySecurityRequestTab,
     CLIENT_SCRIPT_LIST.key: ClientScriptRequestTab,
     BUSINESS_RULE_LIST.key: BusinessRuleRequestTab,
     SCRIPT_INCLUDE_LIST.key: ScriptIncludeRequestTab,
