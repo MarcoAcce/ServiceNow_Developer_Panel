@@ -18,6 +18,7 @@ from request_hints import RequestHintRepository
 from request_tab import RequestTab
 from request_tabs import create_request_tab
 
+from response_context import ResponseContext
 from response_repository import ResponseRepository
 from response_tab import ResponseTab
 
@@ -55,8 +56,12 @@ class MainWindow(FramelessWindow):
         self.apply_window_theme(theme)
         self.repository: ConfigRepository = repository
         self.hints: RequestHintRepository = RequestHintRepository(database)
+        self.responses: ResponseRepository = ResponseRepository(database)
         self.service: RequestService = CachedRequestService(
-            instance_service(self), ResponseRepository(database), self
+            instance_service(self), self.responses, self
+        )
+        self.response_context: ResponseContext = ResponseContext(
+            service=self.service, responses=self.responses, hints=self.hints
         )
         self.sidebar: Sidebar = Sidebar()
         self.home_tab: HomeTab = HomeTab("Home", repository)
@@ -109,7 +114,9 @@ class MainWindow(FramelessWindow):
         self._display_sidebar_page()
 
     def add_response_page(self, page: ResponseTab) -> None:
+        page.attach(self.response_context)
         page.refreshRequested.connect(self.refresh_response_page)
+        page.runningChanged.connect(self._set_busy)
         page.set_refresh_enabled(not self._busy)
         self.response_tabs.append(page)
         self.sidebar.add_response_page(page)
@@ -130,6 +137,7 @@ class MainWindow(FramelessWindow):
             return
         if page is self._refresh_page:
             self._cancel_refresh()
+        page.cancel()
         self.sidebar.remove_page(page)
         self.response_tabs.remove(page)
         self._detach(page)

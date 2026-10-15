@@ -1,4 +1,5 @@
 import base64
+import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from urllib.parse import urlencode
@@ -33,6 +34,10 @@ UNREADABLE_AUTHENTICATION_MESSAGE: str = (
 MISSING_ADDRESS_MESSAGE: str = "the selected instance has no address"
 MISSING_TOKEN_MESSAGE: str = "the active authentication method has no usable token"
 UNSUPPORTED_AUTHENTICATION_MESSAGE: str = "the authentication method {label} is not supported yet"
+PART_ERROR_MESSAGE: str = "{table}: {message}"
+PARAMETER_SEPARATOR: str = "&"
+PARAMETER_TEMPLATE: str = "{name}={value}"
+COMPOSITE_STATUS_CODE: int = 200
 
 
 class ServiceConfigurationError(Exception):
@@ -60,6 +65,17 @@ class RequestTarget:
 
 
 @dataclass(frozen=True)
+class RequestPart:
+    table: str
+    parameters: dict[str, str]
+    columns: tuple[str, ...] = ()
+
+    @property
+    def query_string(self) -> str:
+        return query_string(self.parameters)
+
+
+@dataclass(frozen=True)
 class RequestSpec:
     request_type: RequestType
     table: str
@@ -67,9 +83,33 @@ class RequestSpec:
     columns: tuple[str, ...]
     target: RequestTarget = field(default_factory=RequestTarget)
     skip_cache: bool = False
+    stored: bool = True
+    parts: tuple[RequestPart, ...] = ()
 
     def refreshed(self) -> "RequestSpec":
         return replace(self, skip_cache=True)
+
+    def transient(self) -> "RequestSpec":
+        return replace(self, skip_cache=True, stored=False)
+
+    def extended(self, part: RequestPart) -> "RequestSpec":
+        return replace(self, parts=self.parts + (part,))
+
+    @property
+    def composite(self) -> bool:
+        return bool(self.parts)
+
+    def part_specs(self) -> tuple["RequestSpec", ...]:
+        return tuple(
+            replace(
+                self,
+                table=part.table,
+                parameters=part.parameters,
+                columns=part.columns,
+                parts=(),
+            )
+            for part in self.parts
+        )
 
     @property
     def path(self) -> str:
@@ -77,7 +117,19 @@ class RequestSpec:
 
     @property
     def query_string(self) -> str:
-        return "&".join(f"{name}={value}" for name, value in self.parameters.items())
+        return query_string(self.parameters)
+
+
+@dataclass(frozen=True)
+class ResultSection:
+    table: str
+    parameters: dict[str, str]
+    columns: tuple[str, ...]
+    records: list[dict[str, str]]
+
+    @property
+    def query_string(self) -> str:
+        return query_string(self.parameters)
 
 
 @dataclass(frozen=True)
@@ -88,6 +140,8 @@ class RequestResult:
     elapsed_ms: int
     source: str
     executed_at: datetime = field(default_factory=datetime.now)
+    sections: tuple[ResultSection, ...] = ()
+    cache_name: str = ""
 
     @property
     def request_type(self) -> RequestType:
@@ -129,6 +183,28 @@ class RequestError:
 class PreparedRequest:
     url: str
     headers: dict[str, str]
+
+
+def query_string(parameters: dict[str, str]) -> str:
+    return PARAMETER_SEPARATOR.join(
+        PARAMETER_TEMPLATE.format(name=name, value=value)
+        for name, value in parameters.items()
+    )
+
+
+def section_of(result: RequestResult) -> ResultSection:
+    return ResultSection(
+        table=result.table,
+        parameters=result.parameters,
+        columns=result.columns,
+        records=result.records,
+    )
+
+
+def part_of(section: ResultSection) -> RequestPart:
+    return RequestPart(
+        table=section.table, parameters=section.parameters, columns=section.columns
+    )
 
 
 def instance_url(address: str) -> str:
@@ -218,6 +294,89 @@ class FailedRequestCall(RequestCall):
 
     def _emit_error(self) -> None:
         self.failed.emit(self._error)
+
+
+class CompositeRequestCall(RequestCall):
+
+    def __init__(
+        self,
+        request: RequestSpec,
+        service: "RequestService",
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(request, parent)
+        self._service: "RequestService" = service
+        self._pending: list[RequestSpec] = list(request.part_specs())
+        self._sections: list[ResultSection] = []
+        self._status: int = COMPOSITE_STATUS_CODE
+        self._started: float = time.monotonic()
+        self._cancelled: bool = False
+        self._call: RequestCall | None = None
+        self._send_next()
+
+    def is_running(self) -> bool:
+        if self._cancelled:
+            return False
+        return bool(self._pending) or self._call is not None
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        self._pending.clear()
+        self._release_call(cancel=True)
+
+    def _send_next(self) -> None:
+        if not self._pending:
+            self._emit_result()
+            return
+        call = self._service.send(self._pending.pop(0))
+        self._call = call
+        call.succeeded.connect(self._on_succeeded)
+        call.failed.connect(self._on_failed)
+
+    def _on_succeeded(self, result: RequestResult) -> None:
+        self._release_call()
+        if self._cancelled:
+            return
+        self._status = result.status_code
+        self._sections.append(section_of(result))
+        self._send_next()
+
+    def _on_failed(self, error: RequestError) -> None:
+        self._release_call()
+        if self._cancelled:
+            return
+        self._pending.clear()
+        self.failed.emit(
+            RequestError(
+                request=self.request,
+                message=PART_ERROR_MESSAGE.format(
+                    table=error.request.table, message=error.message
+                ),
+                status_code=error.status_code,
+            )
+        )
+
+    def _emit_result(self) -> None:
+        sections = tuple(self._sections)
+        self.succeeded.emit(
+            RequestResult(
+                request=self.request,
+                records=[record for section in sections for record in section.records],
+                status_code=self._status,
+                elapsed_ms=int((time.monotonic() - self._started) * 1000),
+                source=self.request.target.address,
+                sections=sections,
+            )
+        )
+
+    def _release_call(self, cancel: bool = False) -> None:
+        call = self._call
+        self._call = None
+        if call is None:
+            return
+        if cancel:
+            call.cancel()
+        call.deleteLater()
 
 
 class RequestService(QObject):

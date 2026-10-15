@@ -8,6 +8,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 from service import (
     LIMIT_PARAMETER,
     OFFSET_PARAMETER,
+    CompositeRequestCall,
     FailedRequestCall,
     PreparedRequest,
     RequestCall,
@@ -145,6 +146,8 @@ class HttpRequestService(RequestService):
         self._manager: QNetworkAccessManager = QNetworkAccessManager(self)
 
     def send(self, request: RequestSpec) -> RequestCall:
+        if request.composite:
+            return CompositeRequestCall(request, self, self)
         try:
             prepare_request(request)
         except ServiceConfigurationError as error:

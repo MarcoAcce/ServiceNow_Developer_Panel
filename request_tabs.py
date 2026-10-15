@@ -4,13 +4,16 @@ from config_repository import ConfigRepository
 from filter_fields import RadioChoiceField
 from request_hints import RequestHintRepository
 from query_builder import OPERATOR_CONTAINS, OPERATOR_IS, build_condition
-from request_tab import TABLE_PLACEHOLDER, RequestTab, required_label, required_message
+from multiple_tables_request_tab import MultipleTablesRequestTab
+from request_tab import RequestTab, TableRequestTab, required_label, required_message
 from suggestion_field import SuggestionField
+from table_query_form import TABLE_PLACEHOLDER
 from request_types import (
     ACL_LIST,
     BUSINESS_RULE_LIST,
     CLIENT_SCRIPT_LIST,
     DATA_POLICY_LIST,
+    MULTIPLE_TABLES,
     SCRIPT_INCLUDE_LIST,
     TABLE_DICTIONARY,
     TABLE_RECORDS,
@@ -65,7 +68,7 @@ ACL_TABLE_REQUIRED: str = required_message(ACL_TABLE_LABEL)
 ACL_FIELD_REQUIRED: str = required_message(ACL_FIELD_LABEL)
 
 
-class TableRecordsRequestTab(RequestTab):
+class TableRecordsRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -86,7 +89,7 @@ class TableRecordsRequestTab(RequestTab):
         return TableRecordsResponseTab(result)
 
 
-class DictionaryRequestTab(RequestTab):
+class DictionaryRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -108,7 +111,7 @@ class DictionaryRequestTab(RequestTab):
         return DictionaryResponseTab(result)
 
 
-class AclRequestTab(RequestTab):
+class AclRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -189,7 +192,7 @@ class AclRequestTab(RequestTab):
         self.scope_hint.setText(ACL_SCOPE_HINTS[scope])
 
 
-class ClientScriptRequestTab(RequestTab):
+class ClientScriptRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -213,7 +216,7 @@ class ClientScriptRequestTab(RequestTab):
         return ClientScriptResponseTab(result)
 
 
-class BusinessRuleRequestTab(RequestTab):
+class BusinessRuleRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -236,7 +239,7 @@ class BusinessRuleRequestTab(RequestTab):
         return BusinessRuleResponseTab(result)
 
 
-class ScriptIncludeRequestTab(RequestTab):
+class ScriptIncludeRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -264,7 +267,7 @@ class ScriptIncludeRequestTab(RequestTab):
         return ScriptIncludeResponseTab(result)
 
 
-class DataPolicyRequestTab(RequestTab):
+class DataPolicyRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -287,7 +290,7 @@ class DataPolicyRequestTab(RequestTab):
         return DataPolicyResponseTab(result)
 
 
-class UiPolicyRequestTab(RequestTab):
+class UiPolicyRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -310,7 +313,7 @@ class UiPolicyRequestTab(RequestTab):
         return UiPolicyResponseTab(result)
 
 
-class UiActionRequestTab(RequestTab):
+class UiActionRequestTab(TableRequestTab):
 
     def __init__(
         self,
@@ -336,6 +339,7 @@ class UiActionRequestTab(RequestTab):
 
 REQUEST_TAB_CLASSES: dict[str, type[RequestTab]] = {
     TABLE_RECORDS.key: TableRecordsRequestTab,
+    MULTIPLE_TABLES.key: MultipleTablesRequestTab,
     TABLE_DICTIONARY.key: DictionaryRequestTab,
     ACL_LIST.key: AclRequestTab,
     CLIENT_SCRIPT_LIST.key: ClientScriptRequestTab,

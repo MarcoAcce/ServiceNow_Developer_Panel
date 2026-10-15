@@ -1,18 +1,18 @@
 from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout
 
 from service import RequestResult
-from response_tab import ResponseTab
+from response_tab import RecordsResponseTab
 from ui_widgets import script_view, section_label
 
 SCRIPT_PREVIEW_HEIGHT: int = 180
 EMPTY_SCRIPT_MESSAGE: str = "Select a row to read its script."
 
 
-class TableRecordsResponseTab(ResponseTab):
+class TableRecordsResponseTab(RecordsResponseTab):
     pass
 
 
-class DictionaryResponseTab(ResponseTab):
+class DictionaryResponseTab(RecordsResponseTab):
 
     def column_label(self, column: str) -> str:
         if column == "element":
@@ -22,7 +22,7 @@ class DictionaryResponseTab(ResponseTab):
         return super().column_label(column)
 
 
-class ScriptResponseTab(ResponseTab):
+class ScriptResponseTab(RecordsResponseTab):
 
     script_field: str = "script"
     script_section_title: str = "Script"
@@ -42,8 +42,9 @@ class ScriptResponseTab(ResponseTab):
     def on_row_selected(self, record: dict[str, str]) -> None:
         self.script_preview.setPlainText(record.get(self.script_field, ""))
 
-    def result_updated(self) -> None:
+    def fill_content(self) -> None:
         self.script_preview.clear()
+        super().fill_content()
 
 
 class AclResponseTab(ScriptResponseTab):
@@ -71,7 +72,7 @@ class ScriptIncludeResponseTab(ScriptResponseTab):
     script_section_title: str = "Script include source"
 
 
-class DataPolicyResponseTab(ResponseTab):
+class DataPolicyResponseTab(RecordsResponseTab):
     pass
 
 
