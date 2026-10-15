@@ -9,7 +9,7 @@ from acl_requests import (
     ROLE_NAME_FIELD,
     ROLE_REFERENCE_FIELD,
 )
-from service import RequestResult
+from request_model import RequestResult
 
 TRUE_VALUE: str = "true"
 FALSE_VALUE: str = "false"

@@ -13,6 +13,7 @@ from config_repository import ConfigRepository
 from icons import COLLAPSE_ICON, DELETE_ICON, EXPAND_ICON, IconButton, Tone
 from multiple_tables_response_tab import MultipleTablesResponseTab
 from request_hints import RequestHintRepository
+from request_model import tables_problem
 from request_tab import RequestTab
 from request_types import MULTIPLE_TABLES
 from response_tab import ResponseTab
@@ -36,8 +37,6 @@ NEW_TABLE_TITLE: str = "New table"
 EXPAND_TOOLTIP: str = "Show the query of this table"
 COLLAPSE_TOOLTIP: str = "Hide the query of this table"
 REMOVE_TOOLTIP: str = "Remove this table from the request"
-TABLES_REQUIRED_MESSAGE: str = "At least one table is required to send the request."
-DUPLICATE_MESSAGE: str = "The table {table} is requested more than once."
 ROW_SPACING: int = 6
 ROW_MARGIN: int = 8
 HEADER_SPACING: int = 6
@@ -137,15 +136,7 @@ class MultipleTablesRequestTab(RequestTab):
         return tuple(part for part in parts if part is not None)
 
     def missing_requirement(self) -> str:
-        tables = [row.table_name() for row in self._rows if not row.is_empty()]
-        if not tables:
-            return TABLES_REQUIRED_MESSAGE
-        seen: set[str] = set()
-        for table in tables:
-            if table in seen:
-                return DUPLICATE_MESSAGE.format(table=table)
-            seen.add(table)
-        return ""
+        return tables_problem([row.table_name() for row in self._rows if not row.is_empty()])
 
     def record_hints(self) -> None:
         for part in self.parts():

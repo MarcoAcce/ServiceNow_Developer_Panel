@@ -3,12 +3,9 @@ import time
 from PySide6.QtCore import QObject
 
 from background_task import BackgroundTask
-from response_repository import CachedResponse, ResponseRepository
+from response_repository import CachedResponse, ResponseRepository, cached_result
 from service import RequestCall, RequestError, RequestResult, RequestService, RequestSpec
 
-CACHE_STATUS_CODE: int = 200
-CACHE_TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
-CACHE_SOURCE: str = "local cache of {received_at}"
 SERVICE_NAME: str = "cached service"
 SERVICE_DESCRIPTION: str = "the local cache, or {source}"
 
@@ -63,20 +60,7 @@ class CachedRequestCall(RequestCall):
         if not isinstance(cached, CachedResponse):
             self._send()
             return
-        self.succeeded.emit(
-            RequestResult(
-                request=self.request,
-                records=cached.records,
-                status_code=CACHE_STATUS_CODE,
-                elapsed_ms=self._elapsed_ms(),
-                source=CACHE_SOURCE.format(
-                    received_at=cached.executed_at.strftime(CACHE_TIME_FORMAT)
-                ),
-                executed_at=cached.executed_at,
-                sections=cached.sections,
-                cache_name=cached.cache_name,
-            )
-        )
+        self.succeeded.emit(cached_result(self.request, cached, self._elapsed_ms()))
 
     def _on_lookup_failed(self, message: str) -> None:
         self._task = None

@@ -1,4 +1,3 @@
-import csv
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -23,6 +22,7 @@ from record_columns import ordered_columns
 from response_context import ResponseContext
 from service import RequestResult
 from tab import Tab
+from table_export import write_csv
 from ui_widgets import (
     check_item,
     hint_label,
@@ -451,11 +451,7 @@ class RecordsResponseTab(ResponseTab):
         path, _ = QFileDialog.getSaveFileName(self, "Save response", suggestion, "CSV files (*.csv)")
         if not path:
             return
-        columns = self.export_columns()
         try:
-            with Path(path).open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=list(columns), extrasaction="ignore")
-                writer.writeheader()
-                writer.writerows(self.records())
+            write_csv(Path(path), self.export_columns(), self.records())
         except OSError as error:
             show_error(self, SAVE_ERROR_TITLE, str(error))

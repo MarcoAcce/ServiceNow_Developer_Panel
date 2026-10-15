@@ -1,10 +1,23 @@
-import json
 import time
-from typing import Any
 
 from PySide6.QtCore import QObject, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from http_payload import (
+    HTTP_ERROR_STATUS,
+    MAXIMUM_PAGE_SIZE,
+    REQUEST_TIMEOUT_MS,
+    error_message,
+    has_more,
+    is_paged,
+    page_overrides,
+    page_size,
+    parameter_value,
+    record_of,
+    response_document,
+    response_records,
+    value_of,
+)
 from service import (
     LIMIT_PARAMETER,
     OFFSET_PARAMETER,
@@ -20,24 +33,23 @@ from service import (
     prepare_request,
 )
 
-REQUEST_TIMEOUT_MS: int = 30000
-MAXIMUM_PAGE_SIZE: int = 10000
+__all__ = [
+    "HTTP_ERROR_STATUS",
+    "MAXIMUM_PAGE_SIZE",
+    "REQUEST_TIMEOUT_MS",
+    "HttpRequestCall",
+    "HttpRequestService",
+    "error_message",
+    "network_request",
+    "parameter_value",
+    "record_of",
+    "response_document",
+    "response_records",
+    "value_of",
+]
+
 SERVICE_NAME: str = "ServiceNow instance"
 SERVICE_DESCRIPTION: str = "a live call to the selected instance"
-HTTP_ERROR_STATUS: int = 400
-RESULT_KEY: str = "result"
-ERROR_KEY: str = "error"
-MESSAGE_KEY: str = "message"
-DETAIL_KEY: str = "detail"
-VALUE_KEY: str = "value"
-DISPLAY_VALUE_KEY: str = "display_value"
-MESSAGE_SEPARATOR: str = ": "
-TRUE_VALUE: str = "true"
-FALSE_VALUE: str = "false"
-INVALID_PAYLOAD_MESSAGE: str = "the instance answered with a body that is not valid json"
-UNEXPECTED_PAYLOAD_MESSAGE: str = "the instance answered without a result list"
-STATUS_MESSAGE: str = "the instance answered with the status {status}"
-NO_RESPONSE_MESSAGE: str = "the instance did not answer"
 
 
 class HttpRequestCall(RequestCall):
@@ -67,10 +79,6 @@ class HttpRequestCall(RequestCall):
         if self._reply is not None:
             self._reply.abort()
 
-    @property
-    def _paged(self) -> bool:
-        return self._wanted > MAXIMUM_PAGE_SIZE
-
     def _fetch_page(self) -> None:
         try:
             prepared = prepare_request(self.request, self._page_parameters())
@@ -81,13 +89,10 @@ class HttpRequestCall(RequestCall):
         self._reply.finished.connect(self._on_finished)
 
     def _page_parameters(self) -> dict[str, str]:
-        if not self._paged:
+        if not is_paged(self._wanted):
             return {}
-        self._page_size = min(MAXIMUM_PAGE_SIZE, self._wanted - len(self._records))
-        return {
-            LIMIT_PARAMETER: str(self._page_size),
-            OFFSET_PARAMETER: str(self._offset + len(self._records)),
-        }
+        self._page_size = page_size(self._wanted, len(self._records))
+        return page_overrides(self._page_size, self._offset, len(self._records))
 
     def _on_finished(self) -> None:
         reply = self._reply
@@ -124,9 +129,7 @@ class HttpRequestCall(RequestCall):
         )
 
     def _has_more(self, received: int) -> bool:
-        if not self._paged or received < self._page_size:
-            return False
-        return len(self._records) < self._wanted
+        return has_more(self._wanted, len(self._records), received, self._page_size)
 
     def _emit_error(self, message: str, status: int) -> None:
         self.failed.emit(
@@ -158,75 +161,9 @@ class HttpRequestService(RequestService):
         return SERVICE_DESCRIPTION
 
 
-def parameter_value(request: RequestSpec, name: str) -> int:
-    value = request.parameters.get(name, "").strip()
-    return int(value) if value.isdigit() else 0
-
-
 def network_request(prepared: PreparedRequest) -> QNetworkRequest:
     request = QNetworkRequest(QUrl(prepared.url))
     request.setTransferTimeout(REQUEST_TIMEOUT_MS)
     for name, value in prepared.headers.items():
         request.setRawHeader(name.encode("utf-8"), value.encode("utf-8"))
     return request
-
-
-def response_records(payload: bytes) -> list[dict[str, str]]:
-    result = response_document(payload).get(RESULT_KEY)
-    if isinstance(result, dict):
-        result = [result]
-    if not isinstance(result, list):
-        raise ValueError(UNEXPECTED_PAYLOAD_MESSAGE)
-    return [record_of(entry) for entry in result if isinstance(entry, dict)]
-
-
-def response_document(payload: bytes) -> dict[str, Any]:
-    if not payload:
-        raise ValueError(NO_RESPONSE_MESSAGE)
-    try:
-        document = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(INVALID_PAYLOAD_MESSAGE) from error
-    if not isinstance(document, dict):
-        raise ValueError(UNEXPECTED_PAYLOAD_MESSAGE)
-    return document
-
-
-def error_message(payload: bytes, reason: str, status: int) -> str:
-    details = payload_error(payload)
-    if details and reason:
-        return f"{reason}{MESSAGE_SEPARATOR}{details}"
-    return details or reason or STATUS_MESSAGE.format(status=status)
-
-
-def payload_error(payload: bytes) -> str:
-    try:
-        document = response_document(payload)
-    except ValueError:
-        return ""
-    details = document.get(ERROR_KEY)
-    if not isinstance(details, dict):
-        return ""
-    parts = [
-        str(details.get(key, "")).strip()
-        for key in (MESSAGE_KEY, DETAIL_KEY)
-        if str(details.get(key, "")).strip()
-    ]
-    return MESSAGE_SEPARATOR.join(parts)
-
-
-def record_of(entry: dict[str, Any]) -> dict[str, str]:
-    return {str(key): value_of(value) for key, value in entry.items()}
-
-
-def value_of(value: Any) -> str:
-    if isinstance(value, dict):
-        for key in (DISPLAY_VALUE_KEY, VALUE_KEY):
-            if key in value:
-                return value_of(value[key])
-        return ""
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return TRUE_VALUE if value else FALSE_VALUE
-    return str(value)

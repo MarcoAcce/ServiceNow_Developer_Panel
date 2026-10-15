@@ -1,5 +1,7 @@
 import os
 import sys
+import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 APPLICATION_DIRECTORY_NAME: str = "ServiceNowDeveloperPanel"
@@ -54,6 +56,7 @@ def fallback_data_directory() -> Path:
     return Path(root) / APPLICATION_DIRECTORY_NAME
 
 
+@lru_cache(maxsize=1)
 def data_directory() -> Path:
     packaged = installation_directory() / DATA_DIRECTORY_NAME
     if _is_writable(packaged):
@@ -78,11 +81,11 @@ def cache_path(cache_name: str) -> Path:
 
 
 def _is_writable(directory: Path) -> bool:
-    probe = directory / WRITE_PROBE_NAME
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        probe.touch()
-        probe.unlink()
+        descriptor, probe = tempfile.mkstemp(prefix=WRITE_PROBE_NAME, dir=directory)
+        os.close(descriptor)
+        Path(probe).unlink()
     except OSError:
         return False
     return True

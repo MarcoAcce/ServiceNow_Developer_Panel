@@ -1,19 +1,22 @@
 from collections.abc import Sequence
 from dataclasses import replace
 
-from query_builder import (
+from query_conditions import (
     AND_SEPARATOR,
     OPERATOR_IS,
     OPERATOR_IS_ONE_OF,
     build_condition,
 )
-from service import (
+from request_model import (
     FIELDS_PARAMETER,
     LIMIT_PARAMETER,
+    ORDER_PARAMETER,
     QUERY_PARAMETER,
     RequestPart,
     RequestSpec,
+    RequestTarget,
 )
+from request_types import VERIFY_SECURITY
 
 ACL_TABLE: str = "sys_security_acl"
 ACL_ROLE_TABLE: str = "sys_security_acl_role"
@@ -122,3 +125,21 @@ def acl_composite(spec: RequestSpec, names: Sequence[str]) -> RequestSpec:
         columns=ACL_FIELDS,
         parts=(control, role_part(names), operation_part()),
     )
+
+
+def verification_request(
+    names: Sequence[str], operation: str, target: RequestTarget
+) -> RequestSpec:
+    parameters = {
+        QUERY_PARAMETER: control_query(names, operation),
+        ORDER_PARAMETER: NAME_FIELD,
+        LIMIT_PARAMETER: str(CONTROL_LIMIT),
+    }
+    spec = RequestSpec(
+        request_type=VERIFY_SECURITY,
+        table=ACL_TABLE,
+        parameters=parameters,
+        columns=(),
+        target=target,
+    )
+    return acl_composite(spec, names)

@@ -15,7 +15,7 @@ from response_cache import (
     read_cache_tables,
     write_cache_tables,
 )
-from service import RequestResult, RequestSpec, ResultSection, part_of
+from request_model import RequestResult, RequestSpec, ResultSection, part_of
 
 RESPONSE_INSERT: str = (
     "INSERT INTO response "
@@ -40,6 +40,8 @@ TABLE_KEY: str = "table"
 PARAMETERS_KEY: str = "parameters"
 PARTS_KEY: str = "parts"
 NO_RESPONSE_ID: int = 0
+CACHE_STATUS_CODE: int = 200
+CACHE_SOURCE: str = "local cache of {received_at}"
 EXTEND_FAILED_MESSAGE: str = "the local cache of this response cannot be extended"
 
 
@@ -75,6 +77,23 @@ class CachedResponse:
     executed_at: datetime
     cache_name: str
     sections: tuple[ResultSection, ...] = ()
+
+
+def cached_result(
+    request: RequestSpec, cached: CachedResponse, elapsed_ms: int
+) -> RequestResult:
+    return RequestResult(
+        request=request,
+        records=cached.records,
+        status_code=CACHE_STATUS_CODE,
+        elapsed_ms=elapsed_ms,
+        source=CACHE_SOURCE.format(
+            received_at=cached.executed_at.strftime(RESPONSE_TIME_FORMAT)
+        ),
+        executed_at=cached.executed_at,
+        sections=cached.sections,
+        cache_name=cached.cache_name,
+    )
 
 
 class ResponseRepository:

@@ -1,4 +1,6 @@
 import sqlite3
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -60,6 +62,18 @@ DELETE_INSTANCE_MESSAGE: str = (
 )
 DELETE_AUTHENTICATION_TITLE: str = "Delete authentication method"
 DELETE_AUTHENTICATION_MESSAGE: str = "Delete the {label} method of {name}?"
+USER_KIND: str = "user"
+MCP_KIND: str = "mcp"
+AUTHENTICATION_SECTION_LABEL: str = "Authentication"
+MCP_AUTHENTICATION_SECTION_LABEL: str = "MCP authentication"
+MCP_AUTHENTICATION_HINT: str = (
+    "Used only by the local MCP server. Agents that call the server never see these details."
+)
+ADD_MCP_AUTHENTICATION_LABEL: str = "Add MCP authentication method"
+NO_MCP_AUTHENTICATION_MESSAGE: str = (
+    "No MCP authentication method configured for this instance."
+)
+DELETE_MCP_AUTHENTICATION_MESSAGE: str = "Delete the {label} MCP method of {name}?"
 DATABASE_ERROR_TITLE: str = "Configuration not saved"
 DUPLICATE_INSTANCE_MESSAGE: str = "An instance named {name} already exists."
 APPEARANCE_HINT: str = (
@@ -107,6 +121,35 @@ CARD_SPACING: int = 6
 ACTION_SPACING: int = 10
 
 
+@dataclass(frozen=True)
+class AuthenticationSection:
+    kind: str
+    title: str
+    hint: str
+    empty_message: str
+    add_label: str
+    delete_message: str
+
+
+USER_SECTION: AuthenticationSection = AuthenticationSection(
+    kind=USER_KIND,
+    title=AUTHENTICATION_SECTION_LABEL,
+    hint="",
+    empty_message=NO_AUTHENTICATION_MESSAGE,
+    add_label=ADD_AUTHENTICATION_LABEL,
+    delete_message=DELETE_AUTHENTICATION_MESSAGE,
+)
+MCP_SECTION: AuthenticationSection = AuthenticationSection(
+    kind=MCP_KIND,
+    title=MCP_AUTHENTICATION_SECTION_LABEL,
+    hint=MCP_AUTHENTICATION_HINT,
+    empty_message=NO_MCP_AUTHENTICATION_MESSAGE,
+    add_label=ADD_MCP_AUTHENTICATION_LABEL,
+    delete_message=DELETE_MCP_AUTHENTICATION_MESSAGE,
+)
+AUTHENTICATION_SECTIONS: tuple[AuthenticationSection, ...] = (USER_SECTION, MCP_SECTION)
+
+
 class AuthenticationRow(QFrame):
 
     activeToggled = Signal(object, bool)
@@ -149,15 +192,65 @@ class AuthenticationRow(QFrame):
         self.activeToggled.emit(self.authentication, checked)
 
 
+class AuthenticationList(QWidget):
+
+    addRequested = Signal(object, object)
+    activeToggled = Signal(object, bool, object)
+    editRequested = Signal(object, object)
+    deleteRequested = Signal(object, object)
+
+    def __init__(
+        self,
+        instance: Instance,
+        section: AuthenticationSection,
+        authentications: list[Authentication],
+    ) -> None:
+        super().__init__()
+        self.instance: Instance = instance
+        self.section: AuthenticationSection = section
+        self._build_ui(authentications)
+
+    def _build_ui(self, authentications: list[Authentication]) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(CARD_SPACING)
+        layout.addWidget(section_label(self.section.title))
+        if self.section.hint:
+            layout.addWidget(hint_label(self.section.hint))
+        if not authentications:
+            layout.addWidget(hint_label(self.section.empty_message))
+        for authentication in authentications:
+            layout.addWidget(self._build_row(authentication))
+        add_button = QPushButton(self.section.add_label)
+        add_button.clicked.connect(lambda: self.addRequested.emit(self.instance, self.section))
+        layout.addWidget(add_button)
+
+    def _build_row(self, authentication: Authentication) -> AuthenticationRow:
+        row = AuthenticationRow(authentication)
+        row.activeToggled.connect(self._on_active_toggled)
+        row.editRequested.connect(self._on_edit_requested)
+        row.deleteRequested.connect(self._on_delete_requested)
+        return row
+
+    def _on_active_toggled(self, authentication: Authentication, active: bool) -> None:
+        self.activeToggled.emit(authentication, active, self.section)
+
+    def _on_edit_requested(self, authentication: Authentication) -> None:
+        self.editRequested.emit(authentication, self.section)
+
+    def _on_delete_requested(self, authentication: Authentication) -> None:
+        self.deleteRequested.emit(authentication, self.section)
+
+
 class InstanceCard(QFrame):
 
     expandRequested = Signal(object)
     collapseRequested = Signal(object)
     deleteRequested = Signal(object)
-    addAuthenticationRequested = Signal(object)
-    authenticationActiveToggled = Signal(object, bool)
-    authenticationEditRequested = Signal(object)
-    authenticationDeleteRequested = Signal(object)
+    addAuthenticationRequested = Signal(object, object)
+    authenticationActiveToggled = Signal(object, bool, object)
+    authenticationEditRequested = Signal(object, object)
+    authenticationDeleteRequested = Signal(object, object)
 
     def __init__(self, instance: Instance, expanded: bool) -> None:
         super().__init__()
@@ -168,15 +261,14 @@ class InstanceCard(QFrame):
         self._body_layout: QVBoxLayout = QVBoxLayout(self._body)
         self._build_ui()
 
-    def set_authentications(self, authentications: list[Authentication]) -> None:
+    def set_authentications(
+        self, listings: Sequence[tuple[AuthenticationSection, list[Authentication]]]
+    ) -> None:
         _clear_layout(self._body_layout)
-        if not authentications:
-            self._body_layout.addWidget(hint_label(NO_AUTHENTICATION_MESSAGE))
-        for authentication in authentications:
-            self._body_layout.addWidget(self._build_row(authentication))
-        add_button = QPushButton(ADD_AUTHENTICATION_LABEL)
-        add_button.clicked.connect(lambda: self.addAuthenticationRequested.emit(self.instance))
-        self._body_layout.addWidget(add_button)
+        for index, (section, authentications) in enumerate(listings):
+            if index:
+                self._body_layout.addWidget(horizontal_rule())
+            self._body_layout.addWidget(self._build_list(section, authentications))
 
     def _build_ui(self) -> None:
         as_card(self)
@@ -198,12 +290,15 @@ class InstanceCard(QFrame):
         header.addWidget(delete_button)
         return header
 
-    def _build_row(self, authentication: Authentication) -> AuthenticationRow:
-        row = AuthenticationRow(authentication)
-        row.activeToggled.connect(self.authenticationActiveToggled.emit)
-        row.editRequested.connect(self.authenticationEditRequested.emit)
-        row.deleteRequested.connect(self.authenticationDeleteRequested.emit)
-        return row
+    def _build_list(
+        self, section: AuthenticationSection, authentications: list[Authentication]
+    ) -> AuthenticationList:
+        listing = AuthenticationList(self.instance, section, authentications)
+        listing.addRequested.connect(self.addAuthenticationRequested.emit)
+        listing.activeToggled.connect(self.authenticationActiveToggled.emit)
+        listing.editRequested.connect(self.authenticationEditRequested.emit)
+        listing.deleteRequested.connect(self.authenticationDeleteRequested.emit)
+        return listing
 
     def _on_toggle_clicked(self) -> None:
         if self._expanded:
@@ -343,7 +438,12 @@ class ConfigTab(Tab):
         expanded = instance.id == self._expanded_instance_id
         card = InstanceCard(instance, expanded)
         if expanded:
-            card.set_authentications(self._repository.list_authentications(instance.id))
+            card.set_authentications(
+                [
+                    (section, self._authentications(section, instance.id))
+                    for section in AUTHENTICATION_SECTIONS
+                ]
+            )
         card.expandRequested.connect(self._on_expand)
         card.collapseRequested.connect(self._on_collapse)
         card.deleteRequested.connect(self._on_delete_instance)
@@ -492,15 +592,17 @@ class ConfigTab(Tab):
             self._expanded_instance_id = None
         self._announce()
 
-    def _on_add_authentication(self, instance: Instance) -> None:
+    def _on_add_authentication(
+        self, instance: Instance, section: AuthenticationSection
+    ) -> None:
         dialog = AuthenticationDialog(self)
         if dialog.exec() != AuthenticationDialog.DialogCode.Accepted:
             return
         authentication_type, details = dialog.values()
-        first_method = not self._repository.list_authentications(instance.id)
         try:
-            self._repository.create_authentication(
-                instance.id, authentication_type, details, active=first_method
+            first_method = not self._authentications(section, instance.id)
+            self._create_authentication(
+                section, instance.id, authentication_type, details, first_method
             )
         except (sqlite3.Error, DatabaseError, SecretError) as error:
             self._show_database_error(error)
@@ -508,24 +610,30 @@ class ConfigTab(Tab):
         self._expanded_instance_id = instance.id
         self._announce()
 
-    def _on_edit_authentication(self, authentication: Authentication) -> None:
+    def _on_edit_authentication(
+        self, authentication: Authentication, section: AuthenticationSection
+    ) -> None:
         dialog = AuthenticationDialog(self, authentication)
         if dialog.exec() != AuthenticationDialog.DialogCode.Accepted:
             return
         authentication_type, details = dialog.values()
         try:
-            self._repository.update_authentication(authentication.id, authentication_type, details)
+            self._update_authentication(
+                section, authentication.id, authentication_type, details
+            )
         except (sqlite3.Error, DatabaseError, SecretError) as error:
             self._show_database_error(error)
             return
         self._announce()
 
-    def _on_delete_authentication(self, authentication: Authentication) -> None:
+    def _on_delete_authentication(
+        self, authentication: Authentication, section: AuthenticationSection
+    ) -> None:
         instance_name = self._instance_name(authentication.instance_id)
         confirmed = ask_confirmation(
             self,
             DELETE_AUTHENTICATION_TITLE,
-            DELETE_AUTHENTICATION_MESSAGE.format(
+            section.delete_message.format(
                 label=type_label(authentication.authentication_type), name=instance_name
             ),
             DELETE_LABEL,
@@ -534,22 +642,82 @@ class ConfigTab(Tab):
         if not confirmed:
             return
         try:
-            self._repository.delete_authentication(authentication.id)
+            self._delete_authentication(section, authentication.id)
         except (sqlite3.Error, DatabaseError) as error:
             self._show_database_error(error)
             return
         self._announce()
 
     def _on_authentication_active_toggled(
-        self, authentication: Authentication, active: bool
+        self, authentication: Authentication, active: bool, section: AuthenticationSection
     ) -> None:
         try:
-            self._repository.set_active_authentication(
-                authentication.instance_id, authentication.id, active
+            self._set_active_authentication(
+                section, authentication.instance_id, authentication.id, active
             )
         except (sqlite3.Error, DatabaseError) as error:
             self._show_database_error(error)
         self._announce()
+
+    def _authentications(
+        self, section: AuthenticationSection, instance_id: int
+    ) -> list[Authentication]:
+        if section.kind == MCP_KIND:
+            return self._repository.list_mcp_authentications(instance_id)
+        return self._repository.list_authentications(instance_id)
+
+    def _create_authentication(
+        self,
+        section: AuthenticationSection,
+        instance_id: int,
+        authentication_type: str,
+        details: dict[str, str],
+        active: bool,
+    ) -> None:
+        if section.kind == MCP_KIND:
+            self._repository.create_mcp_authentication(
+                instance_id, authentication_type, details, active=active
+            )
+            return
+        self._repository.create_authentication(
+            instance_id, authentication_type, details, active=active
+        )
+
+    def _update_authentication(
+        self,
+        section: AuthenticationSection,
+        authentication_id: int,
+        authentication_type: str,
+        details: dict[str, str],
+    ) -> None:
+        if section.kind == MCP_KIND:
+            self._repository.update_mcp_authentication(
+                authentication_id, authentication_type, details
+            )
+            return
+        self._repository.update_authentication(authentication_id, authentication_type, details)
+
+    def _delete_authentication(
+        self, section: AuthenticationSection, authentication_id: int
+    ) -> None:
+        if section.kind == MCP_KIND:
+            self._repository.delete_mcp_authentication(authentication_id)
+            return
+        self._repository.delete_authentication(authentication_id)
+
+    def _set_active_authentication(
+        self,
+        section: AuthenticationSection,
+        instance_id: int,
+        authentication_id: int,
+        active: bool,
+    ) -> None:
+        if section.kind == MCP_KIND:
+            self._repository.set_active_mcp_authentication(
+                instance_id, authentication_id, active
+            )
+            return
+        self._repository.set_active_authentication(instance_id, authentication_id, active)
 
     def _instance_name(self, instance_id: int) -> str:
         for instance in self._repository.list_instances():

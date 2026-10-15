@@ -13,13 +13,30 @@ from database_manager import (
 from secret_store import SecretError, decode_details, encode_details
 
 INSTANCE_QUERY: str = "SELECT id, name, address FROM instance ORDER BY name COLLATE NOCASE"
+AUTHENTICATION_TABLE: str = "authentication"
+MCP_AUTHENTICATION_TABLE: str = "mcp_authentication"
 AUTHENTICATION_QUERY: str = (
     "SELECT id, instance_id, authentication_type, authentication_details, active "
-    "FROM authentication WHERE instance_id = ? ORDER BY id"
+    "FROM {table} WHERE instance_id = ? ORDER BY id"
 )
 ACTIVE_AUTHENTICATION_QUERY: str = (
     "SELECT id, instance_id, authentication_type, authentication_details, active "
-    "FROM authentication WHERE instance_id = ? AND active = 1"
+    "FROM {table} WHERE instance_id = ? AND active = 1"
+)
+AUTHENTICATION_INSERT: str = (
+    "INSERT INTO {table} "
+    "(instance_id, authentication_type, authentication_details, active) "
+    "VALUES (?, ?, ?, ?)"
+)
+AUTHENTICATION_UPDATE: str = (
+    "UPDATE {table} SET authentication_type = ?, authentication_details = ? WHERE id = ?"
+)
+AUTHENTICATION_DELETE: str = "DELETE FROM {table} WHERE id = ?"
+AUTHENTICATION_ACTIVATE: str = (
+    "UPDATE {table} SET active = 1 WHERE id = ? AND instance_id = ?"
+)
+AUTHENTICATION_DEACTIVATE: str = (
+    "UPDATE {table} SET active = 0 WHERE instance_id = ? AND active = 1"
 )
 CONFIGURATION_QUERY: str = "SELECT value FROM local_configuration WHERE name = ?"
 CONFIGURATION_UPSERT: str = (
@@ -61,11 +78,25 @@ class ConfigRepository:
         return [Instance(id=row["id"], name=row["name"], address=row["address"]) for row in rows]
 
     def list_authentications(self, instance_id: int) -> list[Authentication]:
-        rows = self._database.query(AUTHENTICATION_QUERY, (instance_id,))
-        return [self._build_authentication(row) for row in rows]
+        return self._list_authentications(AUTHENTICATION_TABLE, instance_id)
 
     def active_authentication(self, instance_id: int) -> Authentication | None:
-        row = self._database.query_one(ACTIVE_AUTHENTICATION_QUERY, (instance_id,))
+        return self._active_authentication(AUTHENTICATION_TABLE, instance_id)
+
+    def list_mcp_authentications(self, instance_id: int) -> list[Authentication]:
+        return self._list_authentications(MCP_AUTHENTICATION_TABLE, instance_id)
+
+    def active_mcp_authentication(self, instance_id: int) -> Authentication | None:
+        return self._active_authentication(MCP_AUTHENTICATION_TABLE, instance_id)
+
+    def _list_authentications(self, table: str, instance_id: int) -> list[Authentication]:
+        rows = self._database.query(AUTHENTICATION_QUERY.format(table=table), (instance_id,))
+        return [self._build_authentication(row) for row in rows]
+
+    def _active_authentication(self, table: str, instance_id: int) -> Authentication | None:
+        row = self._database.query_one(
+            ACTIVE_AUTHENTICATION_QUERY.format(table=table), (instance_id,)
+        )
         return self._build_authentication(row) if row is not None else None
 
     def configuration_value(self, name: str, default: str = "") -> str:
@@ -125,49 +156,109 @@ class ConfigRepository:
         details: dict[str, str],
         active: bool = False,
     ) -> int:
+        return self._create_authentication(
+            AUTHENTICATION_TABLE, instance_id, authentication_type, details, active
+        )
+
+    def update_authentication(
+        self, authentication_id: int, authentication_type: str, details: dict[str, str]
+    ) -> None:
+        self._update_authentication(
+            AUTHENTICATION_TABLE, authentication_id, authentication_type, details
+        )
+
+    def delete_authentication(self, authentication_id: int) -> None:
+        self._delete_authentication(AUTHENTICATION_TABLE, authentication_id)
+
+    def set_active_authentication(
+        self, instance_id: int, authentication_id: int, active: bool
+    ) -> None:
+        self._set_active_authentication(
+            AUTHENTICATION_TABLE, instance_id, authentication_id, active
+        )
+
+    def create_mcp_authentication(
+        self,
+        instance_id: int,
+        authentication_type: str,
+        details: dict[str, str],
+        active: bool = False,
+    ) -> int:
+        return self._create_authentication(
+            MCP_AUTHENTICATION_TABLE, instance_id, authentication_type, details, active
+        )
+
+    def update_mcp_authentication(
+        self, authentication_id: int, authentication_type: str, details: dict[str, str]
+    ) -> None:
+        self._update_authentication(
+            MCP_AUTHENTICATION_TABLE, authentication_id, authentication_type, details
+        )
+
+    def delete_mcp_authentication(self, authentication_id: int) -> None:
+        self._delete_authentication(MCP_AUTHENTICATION_TABLE, authentication_id)
+
+    def set_active_mcp_authentication(
+        self, instance_id: int, authentication_id: int, active: bool
+    ) -> None:
+        self._set_active_authentication(
+            MCP_AUTHENTICATION_TABLE, instance_id, authentication_id, active
+        )
+
+    def _create_authentication(
+        self,
+        table: str,
+        instance_id: int,
+        authentication_type: str,
+        details: dict[str, str],
+        active: bool,
+    ) -> int:
         payload = encode_details(details)
 
         def operation(connection: sqlite3.Connection) -> int:
             if active:
-                _deactivate(connection, instance_id)
+                _deactivate(connection, table, instance_id)
             cursor = connection.execute(
-                "INSERT INTO authentication "
-                "(instance_id, authentication_type, authentication_details, active) "
-                "VALUES (?, ?, ?, ?)",
+                AUTHENTICATION_INSERT.format(table=table),
                 (instance_id, authentication_type, payload, int(active)),
             )
             return int(cursor.lastrowid or 0)
 
         return int(self._database.write_and_wait(operation))
 
-    def update_authentication(
-        self, authentication_id: int, authentication_type: str, details: dict[str, str]
+    def _update_authentication(
+        self,
+        table: str,
+        authentication_id: int,
+        authentication_type: str,
+        details: dict[str, str],
     ) -> None:
         payload = encode_details(details)
 
         def operation(connection: sqlite3.Connection) -> None:
             connection.execute(
-                "UPDATE authentication "
-                "SET authentication_type = ?, authentication_details = ? WHERE id = ?",
+                AUTHENTICATION_UPDATE.format(table=table),
                 (authentication_type, payload, authentication_id),
             )
 
         self._database.write_and_wait(operation)
 
-    def delete_authentication(self, authentication_id: int) -> None:
+    def _delete_authentication(self, table: str, authentication_id: int) -> None:
         def operation(connection: sqlite3.Connection) -> None:
-            connection.execute("DELETE FROM authentication WHERE id = ?", (authentication_id,))
+            connection.execute(
+                AUTHENTICATION_DELETE.format(table=table), (authentication_id,)
+            )
 
         self._database.write_and_wait(operation)
 
-    def set_active_authentication(
-        self, instance_id: int, authentication_id: int, active: bool
+    def _set_active_authentication(
+        self, table: str, instance_id: int, authentication_id: int, active: bool
     ) -> None:
         def operation(connection: sqlite3.Connection) -> None:
-            _deactivate(connection, instance_id)
+            _deactivate(connection, table, instance_id)
             if active:
                 connection.execute(
-                    "UPDATE authentication SET active = 1 WHERE id = ? AND instance_id = ?",
+                    AUTHENTICATION_ACTIVATE.format(table=table),
                     (authentication_id, instance_id),
                 )
 
@@ -190,7 +281,5 @@ class ConfigRepository:
         )
 
 
-def _deactivate(connection: sqlite3.Connection, instance_id: int) -> None:
-    connection.execute(
-        "UPDATE authentication SET active = 0 WHERE instance_id = ? AND active = 1", (instance_id,)
-    )
+def _deactivate(connection: sqlite3.Connection, table: str, instance_id: int) -> None:
+    connection.execute(AUTHENTICATION_DEACTIVATE.format(table=table), (instance_id,))

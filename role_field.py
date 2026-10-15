@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from acl_verification import normalized_roles
 from icons import DELETE_ICON, IconButton, Tone
 from ui_widgets import as_row, section_label
 
@@ -81,12 +82,7 @@ class UserCard(QFrame):
         self._add_row()
 
     def roles(self) -> tuple[str, ...]:
-        collected: dict[str, None] = {}
-        for row in self._rows:
-            role = row.role()
-            if role:
-                collected.setdefault(role, None)
-        return tuple(collected)
+        return normalized_roles(row.role() for row in self._rows)
 
     def is_empty(self) -> bool:
         return not self.roles()

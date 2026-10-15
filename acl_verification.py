@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from acl_controls import ROLE_SEPARATOR, AccessControl
@@ -450,3 +450,19 @@ def evaluate(
             for roles in verification.profiles
         ),
     )
+
+
+def normalized_roles(roles: Iterable[str]) -> tuple[str, ...]:
+    collected: dict[str, None] = {}
+    for role in roles:
+        name = role.strip().lower()
+        if name:
+            collected.setdefault(name, None)
+    return tuple(collected)
+
+
+def normalized_profiles(
+    profiles: Iterable[Iterable[str]],
+) -> tuple[tuple[str, ...], ...]:
+    normalized = (normalized_roles(profile) for profile in profiles)
+    return tuple(roles for roles in normalized if roles)
