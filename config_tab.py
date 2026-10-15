@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -21,6 +20,7 @@ from background_task import BackgroundTask
 from config_dialogs import AuthenticationDialog, InstanceDialog
 from config_repository import Authentication, ConfigRepository, Instance
 from database_manager import DatabaseError, DatabaseManager
+from dialogs import ask_confirmation, show_error
 from request_hints import RequestHintRepository
 from secret_store import SecretError
 from tab import Tab
@@ -72,6 +72,12 @@ CACHE_HINT: str = (
 CACHE_LIFETIME_LABEL: str = "Expiration"
 CACHE_LIFETIME_SUFFIX: str = " minutes"
 CLEANUP_LABEL: str = "Clean up cache now"
+CLEANUP_CONFIRM_LABEL: str = "Clean up"
+CLEANUP_TITLE: str = "Clean up cache"
+CLEANUP_MESSAGE: str = (
+    "Delete the expired responses, their cache files and the cache files nothing refers to?\n"
+    "This cannot be undone."
+)
 CLEANUP_RUNNING_MESSAGE: str = "Cleaning up the local cache..."
 CLEANUP_RESULT_MESSAGE: str = (
     "Removed {responses} expired responses and {files} unused cache files."
@@ -87,6 +93,7 @@ SUGGESTION_HINT: str = (
 SUGGESTION_COUNT_LABEL: str = "Names offered"
 SUGGESTION_SAVED_MESSAGE: str = "Requests now offer up to {count} names."
 CLEAR_SUGGESTIONS_LABEL: str = "Clear suggestions"
+CLEAR_SUGGESTIONS_CONFIRM_LABEL: str = "Clear"
 CLEAR_SUGGESTIONS_TITLE: str = "Clear suggestions"
 CLEAR_SUGGESTIONS_MESSAGE: str = (
     "Forget every table and field name used so far?\nThis cannot be undone."
@@ -374,14 +381,14 @@ class ConfigTab(Tab):
         show_status(self.suggestion_status_label, SUGGESTION_SAVED_MESSAGE.format(count=count))
 
     def _on_clear_suggestions_clicked(self) -> None:
-        confirmed = QMessageBox.question(
+        confirmed = ask_confirmation(
             self,
             CLEAR_SUGGESTIONS_TITLE,
             CLEAR_SUGGESTIONS_MESSAGE,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            CLEAR_SUGGESTIONS_CONFIRM_LABEL,
+            destructive=True,
         )
-        if confirmed != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         try:
             cleared = self._hints.clear()
@@ -397,6 +404,15 @@ class ConfigTab(Tab):
 
     def _on_cleanup_clicked(self) -> None:
         if self._cleanup_task is not None:
+            return
+        confirmed = ask_confirmation(
+            self,
+            CLEANUP_TITLE,
+            CLEANUP_MESSAGE,
+            CLEANUP_CONFIRM_LABEL,
+            destructive=True,
+        )
+        if not confirmed:
             return
         self.cleanup_button.setEnabled(False)
         show_status(self.cache_status_label, CLEANUP_RUNNING_MESSAGE)
@@ -450,9 +466,7 @@ class ConfigTab(Tab):
         try:
             self._expanded_instance_id = self._repository.create_instance(name, address)
         except sqlite3.IntegrityError:
-            QMessageBox.warning(
-                self, DATABASE_ERROR_TITLE, DUPLICATE_INSTANCE_MESSAGE.format(name=name)
-            )
+            show_error(self, DATABASE_ERROR_TITLE, DUPLICATE_INSTANCE_MESSAGE.format(name=name))
             return
         except (sqlite3.Error, DatabaseError) as error:
             self._show_database_error(error)
@@ -460,14 +474,14 @@ class ConfigTab(Tab):
         self._announce()
 
     def _on_delete_instance(self, instance: Instance) -> None:
-        confirmed = QMessageBox.question(
+        confirmed = ask_confirmation(
             self,
             DELETE_INSTANCE_TITLE,
             DELETE_INSTANCE_MESSAGE.format(name=instance.name),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            DELETE_LABEL,
+            destructive=True,
         )
-        if confirmed != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         try:
             self._repository.delete_instance(instance.id)
@@ -508,16 +522,16 @@ class ConfigTab(Tab):
 
     def _on_delete_authentication(self, authentication: Authentication) -> None:
         instance_name = self._instance_name(authentication.instance_id)
-        confirmed = QMessageBox.question(
+        confirmed = ask_confirmation(
             self,
             DELETE_AUTHENTICATION_TITLE,
             DELETE_AUTHENTICATION_MESSAGE.format(
                 label=type_label(authentication.authentication_type), name=instance_name
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            DELETE_LABEL,
+            destructive=True,
         )
-        if confirmed != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
         try:
             self._repository.delete_authentication(authentication.id)
@@ -548,7 +562,7 @@ class ConfigTab(Tab):
         self.configurationChanged.emit()
 
     def _show_database_error(self, error: Exception) -> None:
-        QMessageBox.warning(self, DATABASE_ERROR_TITLE, str(error))
+        show_error(self, DATABASE_ERROR_TITLE, str(error))
 
 
 def _clear_layout(layout: QVBoxLayout) -> None:

@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from config_repository import ConfigRepository
+from dialogs import show_error
 from filter_fields import BooleanFilterField, DateFilterField, RadioChoiceField
 from instance_selector import InstanceSelector
 from query_builder import (
@@ -506,7 +506,7 @@ class RequestTab(Tab):
     def _on_failed(self, error: RequestError) -> None:
         self._release_call()
         show_status(self.status_label, ERROR_MESSAGE.format(message=error.message), failed=True)
-        QMessageBox.warning(self, ERROR_TITLE, error.message)
+        show_error(self, ERROR_TITLE, error.message)
 
     def _release_call(self) -> None:
         if self._call is not None:

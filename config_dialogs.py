@@ -1,18 +1,16 @@
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QLineEdit,
-    QMessageBox,
+    QPushButton,
     QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from authentication_types import AUTHENTICATION_TYPES, AuthenticationType
 from config_repository import Authentication
-from ui_widgets import hint_label
+from dialogs import CANCEL_LABEL, FramelessDialog, show_error
+from ui_widgets import hint_label, primary_button
 
 DEFAULT_SCHEME: str = "https://"
 INSTANCE_DIALOG_WIDTH: int = 460
@@ -28,13 +26,13 @@ MISSING_NAME_MESSAGE: str = "Enter a name for the instance."
 MISSING_ADDRESS_MESSAGE: str = "Enter the address of the instance."
 MISSING_FIELD_MESSAGE: str = "Enter a value for {label}."
 INVALID_INPUT_TITLE: str = "Incomplete configuration"
+SAVE_LABEL: str = "Save"
 
 
-class InstanceDialog(QDialog):
+class InstanceDialog(FramelessDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(ADD_INSTANCE_TITLE)
+        super().__init__(ADD_INSTANCE_TITLE, parent)
         self.setMinimumWidth(INSTANCE_DIALOG_WIDTH)
         self.name_field: QLineEdit = QLineEdit()
         self.address_field: QLineEdit = QLineEdit()
@@ -54,37 +52,28 @@ class InstanceDialog(QDialog):
         super().accept()
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.addWidget(hint_label(INSTANCE_HINT))
+        self.content_layout.addWidget(hint_label(INSTANCE_HINT))
         form = QFormLayout()
         self.name_field.setPlaceholderText("Name shown in the panel, for example development")
         self.address_field.setPlaceholderText("https://example.service-now.com")
         form.addRow("Name", self.name_field)
         form.addRow("Address", self.address_field)
-        root.addLayout(form)
-        root.addWidget(self._build_buttons())
-
-    def _build_buttons(self) -> QDialogButtonBox:
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        return buttons
+        self.content_layout.addLayout(form)
+        self.add_button_row(*_form_buttons(self))
 
     def _warn(self, message: str, target: QLineEdit) -> None:
-        QMessageBox.warning(self, INVALID_INPUT_TITLE, message)
+        show_error(self, INVALID_INPUT_TITLE, message)
         target.setFocus()
 
 
-class AuthenticationDialog(QDialog):
+class AuthenticationDialog(FramelessDialog):
 
     def __init__(
         self, parent: QWidget | None = None, authentication: Authentication | None = None
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(
-            ADD_AUTHENTICATION_TITLE if authentication is None else EDIT_AUTHENTICATION_TITLE
+        super().__init__(
+            ADD_AUTHENTICATION_TITLE if authentication is None else EDIT_AUTHENTICATION_TITLE,
+            parent,
         )
         self.setMinimumWidth(AUTHENTICATION_DIALOG_WIDTH)
         self.type_field: QComboBox = QComboBox()
@@ -108,7 +97,7 @@ class AuthenticationDialog(QDialog):
         _, details = self.values()
         for field in authentication_type.fields:
             if field.required and not details.get(field.key):
-                QMessageBox.warning(
+                show_error(
                     self, INVALID_INPUT_TITLE, MISSING_FIELD_MESSAGE.format(label=field.label)
                 )
                 self._fields[(authentication_type.key, field.key)].setFocus()
@@ -116,17 +105,16 @@ class AuthenticationDialog(QDialog):
         super().accept()
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.addWidget(hint_label(AUTHENTICATION_HINT))
+        self.content_layout.addWidget(hint_label(AUTHENTICATION_HINT))
         form = QFormLayout()
         for authentication_type in AUTHENTICATION_TYPES:
             self.type_field.addItem(authentication_type.label, authentication_type.key)
             self._pages.addWidget(self._build_page(authentication_type))
         self.type_field.currentIndexChanged.connect(self._pages.setCurrentIndex)
         form.addRow("Type", self.type_field)
-        root.addLayout(form)
-        root.addWidget(self._pages)
-        root.addWidget(self._build_buttons())
+        self.content_layout.addLayout(form)
+        self.content_layout.addWidget(self._pages)
+        self.add_button_row(*_form_buttons(self))
         self._pages.setCurrentIndex(0)
 
     def _build_page(self, authentication_type: AuthenticationType) -> QWidget:
@@ -143,14 +131,6 @@ class AuthenticationDialog(QDialog):
             layout.addRow(field.label if field.required else f"{field.label} (optional)", editor)
         return page
 
-    def _build_buttons(self) -> QDialogButtonBox:
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        return buttons
-
     def _selected_type(self) -> AuthenticationType:
         return AUTHENTICATION_TYPES[max(self.type_field.currentIndex(), 0)]
 
@@ -163,6 +143,15 @@ class AuthenticationDialog(QDialog):
             editor = self._fields.get((authentication.authentication_type, key))
             if editor is not None:
                 editor.setText(value)
+
+
+def _form_buttons(dialog: FramelessDialog) -> tuple[QPushButton, QPushButton]:
+    cancel_button = QPushButton(CANCEL_LABEL)
+    cancel_button.clicked.connect(dialog.reject)
+    save_button = primary_button(SAVE_LABEL)
+    save_button.setDefault(True)
+    save_button.clicked.connect(dialog.accept)
+    return cancel_button, save_button
 
 
 def _normalised_address(text: str) -> str:

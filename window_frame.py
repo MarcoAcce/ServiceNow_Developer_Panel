@@ -27,6 +27,7 @@ GLYPH_PEN_WIDTH: float = 1.4
 TITLE_ICON_SIZE: int = 20
 TITLE_SPACING: int = 10
 TITLE_MARGIN: int = 10
+FRAME_BORDER: int = 1
 
 
 class Glyph(StrEnum):
@@ -112,9 +113,10 @@ class WindowButton(QPushButton):
 
 class TitleBar(QWidget):
 
-    def __init__(self, window: QMainWindow) -> None:
+    def __init__(self, window: QWidget, resizable: bool = True) -> None:
         super().__init__()
-        self._window: QMainWindow = window
+        self._window: QWidget = window
+        self._resizable: bool = resizable
         self._press_position: QPoint | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(TITLEBAR_HEIGHT)
@@ -130,14 +132,10 @@ class TitleBar(QWidget):
         font.setPointSize(font.pointSize() + TITLEBAR_POINT_SIZE_DELTA)
         self._title.setFont(font)
 
-        self._minimize: WindowButton = WindowButton(Glyph.MINIMIZE, Role.WINDOW_BUTTON)
-        self._maximize: WindowButton = WindowButton(Glyph.MAXIMIZE, Role.WINDOW_BUTTON)
+        self._minimize: WindowButton | None = None
+        self._maximize: WindowButton | None = None
         self._close: WindowButton = WindowButton(Glyph.CLOSE, Role.WINDOW_CLOSE)
-        self._minimize.setToolTip("Minimize")
-        self._maximize.setToolTip("Maximize")
         self._close.setToolTip("Close")
-        self._minimize.clicked.connect(self._window.showMinimized)
-        self._maximize.clicked.connect(self.toggle_maximized)
         self._close.clicked.connect(self._window.close)
 
         layout = QHBoxLayout(self)
@@ -146,8 +144,15 @@ class TitleBar(QWidget):
         layout.addWidget(self._icon)
         layout.addWidget(self._title)
         layout.addStretch(1)
-        layout.addWidget(self._minimize)
-        layout.addWidget(self._maximize)
+        if self._resizable:
+            self._minimize = WindowButton(Glyph.MINIMIZE, Role.WINDOW_BUTTON)
+            self._maximize = WindowButton(Glyph.MAXIMIZE, Role.WINDOW_BUTTON)
+            self._minimize.setToolTip("Minimize")
+            self._maximize.setToolTip("Maximize")
+            self._minimize.clicked.connect(self._window.showMinimized)
+            self._maximize.clicked.connect(self.toggle_maximized)
+            layout.addWidget(self._minimize)
+            layout.addWidget(self._maximize)
         layout.addWidget(self._close)
 
         self._window.windowTitleChanged.connect(self._title.setText)
@@ -171,14 +176,19 @@ class TitleBar(QWidget):
     def set_theme(self, theme: Theme) -> None:
         color = QColor(*theme.titlebar_text)
         for button in (self._minimize, self._maximize, self._close):
-            button.set_color(color)
+            if button is not None:
+                button.set_color(color)
 
     def refresh_window_state(self) -> None:
+        if self._maximize is None:
+            return
         maximized = self._window.isMaximized() or self._window.isFullScreen()
         self._maximize.set_glyph(Glyph.RESTORE if maximized else Glyph.MAXIMIZE)
         self._maximize.setToolTip("Restore" if maximized else "Maximize")
 
     def toggle_maximized(self) -> None:
+        if not self._resizable:
+            return
         if self._window.isMaximized():
             self._window.showNormal()
         else:
@@ -219,7 +229,7 @@ class TitleBar(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def _start_move(self) -> None:
-        if self._window.isMaximized():
+        if self._resizable and self._window.isMaximized():
             self._window.showNormal()
         handle = self._window.windowHandle()
         if handle is not None:
@@ -255,48 +265,43 @@ GRIP_EDGES: tuple[tuple[Qt.Edge, ...], ...] = (
 )
 
 
-class FramelessWindow(QMainWindow):
+class WindowFrame(QWidget):
 
-    def __init__(self) -> None:
+    def __init__(self, window: QWidget, resizable: bool = True) -> None:
         super().__init__()
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self._frame: QWidget = QWidget()
-        self._frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        set_role(self._frame, Role.WINDOW)
-        self.title_bar: TitleBar = TitleBar(self)
+        self._window: QWidget = window
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        set_role(self, Role.WINDOW)
+        self.title_bar: TitleBar = TitleBar(window, resizable)
         self._body: QWidget = QWidget()
         self._body_layout: QVBoxLayout = QVBoxLayout(self._body)
         self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(0)
 
-        frame_layout = QVBoxLayout(self._frame)
-        frame_layout.setContentsMargins(1, 1, 1, 1)
-        frame_layout.setSpacing(0)
-        frame_layout.addWidget(self.title_bar)
-        frame_layout.addWidget(self._body, 1)
-        super().setCentralWidget(self._frame)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(FRAME_BORDER, FRAME_BORDER, FRAME_BORDER, FRAME_BORDER)
+        layout.setSpacing(0)
+        layout.addWidget(self.title_bar)
+        layout.addWidget(self._body, 1)
 
-        self._grips: list[ResizeGrip] = [ResizeGrip(self._frame, edges) for edges in GRIP_EDGES]
-        self.title_bar.refresh_window_state()
+        self._grips: list[ResizeGrip] = (
+            [ResizeGrip(self, edges) for edges in GRIP_EDGES] if resizable else []
+        )
+        self.refresh_window_state()
 
     def set_body(self, widget: QWidget) -> None:
         self._body_layout.addWidget(widget)
 
-    def apply_window_theme(self, theme: Theme) -> None:
-        self.title_bar.set_theme(theme)
-
-    def changeEvent(self, event: QEvent) -> None:
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.WindowStateChange:
-            self.title_bar.refresh_window_state()
-            self._layout_grips()
+    def refresh_window_state(self) -> None:
+        self.title_bar.refresh_window_state()
+        self._layout_grips()
 
     def resizeEvent(self, event: QEvent) -> None:
         super().resizeEvent(event)
         self._layout_grips()
 
     def _layout_grips(self) -> None:
-        resizable = not (self.isMaximized() or self.isFullScreen())
+        resizable = not (self._window.isMaximized() or self._window.isFullScreen())
         for grip in self._grips:
             grip.setVisible(resizable)
             if resizable:
@@ -305,8 +310,8 @@ class FramelessWindow(QMainWindow):
 
     def _grip_geometry(self, edges: tuple[Qt.Edge, ...]) -> QRect:
         margin = RESIZE_MARGIN
-        width = self._frame.width()
-        height = self._frame.height()
+        width = self.width()
+        height = self.height()
         left = Qt.Edge.LeftEdge in edges
         right = Qt.Edge.RightEdge in edges
         top = Qt.Edge.TopEdge in edges
@@ -316,3 +321,24 @@ class FramelessWindow(QMainWindow):
         grip_width = margin if left or right else max(width - 2 * margin, 0)
         grip_height = margin if top or bottom else max(height - 2 * margin, 0)
         return QRect(x, y, grip_width, grip_height)
+
+
+class FramelessWindow(QMainWindow):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self._frame: WindowFrame = WindowFrame(self)
+        self.title_bar: TitleBar = self._frame.title_bar
+        super().setCentralWidget(self._frame)
+
+    def set_body(self, widget: QWidget) -> None:
+        self._frame.set_body(widget)
+
+    def apply_window_theme(self, theme: Theme) -> None:
+        self.title_bar.set_theme(theme)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._frame.refresh_window_state()
