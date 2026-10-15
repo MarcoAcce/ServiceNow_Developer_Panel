@@ -11,6 +11,8 @@ HOME_ICON: str = "home"
 SETTINGS_ICON: str = "settings"
 REFRESH_ICON: str = "refresh"
 DELETE_ICON: str = "delete"
+ERROR_ICON: str = "error"
+WARNING_ICON: str = "warning"
 
 ICON_PATHS: dict[str, str] = {
     HOME_ICON: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
@@ -32,6 +34,13 @@ ICON_PATHS: dict[str, str] = {
     ),
     DELETE_ICON: (
         "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+    ),
+    ERROR_ICON: (
+        "M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm1 15h-2v-2h2v2z"
+        "m0-4h-2V7h2v6z"
+    ),
+    WARNING_ICON: (
+        "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"
     ),
 }
 

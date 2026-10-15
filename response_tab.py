@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dialogs import show_error
 from icons import REFRESH_ICON, IconButton
 from record_columns import ordered_columns
 from service import RequestResult
@@ -37,6 +37,7 @@ DETAIL_SEPARATOR: str = " · "
 REFRESH_TOOLTIP: str = "Run this request again on the same instance"
 REFRESHING_MESSAGE: str = "Running the request again..."
 REFRESH_ERROR_MESSAGE: str = "Refresh failed: {message}"
+SAVE_ERROR_TITLE: str = "Save failed"
 ADDRESS_SEPARATOR: str = " - "
 TABLE_NAME_LIMIT: int = 24
 INSTANCE_NAME_LIMIT: int = 18
@@ -398,4 +399,4 @@ class ResponseTab(Tab):
                 writer.writeheader()
                 writer.writerows(self.result.records)
         except OSError as error:
-            QMessageBox.warning(self, "Save failed", str(error))
+            show_error(self, SAVE_ERROR_TITLE, str(error))
