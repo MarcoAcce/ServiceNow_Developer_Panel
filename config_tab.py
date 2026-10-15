@@ -21,6 +21,7 @@ from background_task import BackgroundTask
 from config_dialogs import AuthenticationDialog, InstanceDialog
 from config_repository import Authentication, ConfigRepository, Instance
 from database_manager import DatabaseError, DatabaseManager
+from request_hints import RequestHintRepository
 from secret_store import SecretError
 from tab import Tab
 from theme import THEMES
@@ -79,6 +80,21 @@ CLEANUP_ERROR_MESSAGE: str = "The clean up failed: {message}"
 LIFETIME_SAVED_MESSAGE: str = "Responses now expire after {minutes} minutes."
 MINIMUM_CACHE_MINUTES: int = 1
 MAXIMUM_CACHE_MINUTES: int = 10080
+SUGGESTION_HINT: str = (
+    "How many table and field names already used are offered when you click a table or a field "
+    "box on a request page. The most recent ones come first."
+)
+SUGGESTION_COUNT_LABEL: str = "Names offered"
+SUGGESTION_SAVED_MESSAGE: str = "Requests now offer up to {count} names."
+CLEAR_SUGGESTIONS_LABEL: str = "Clear suggestions"
+CLEAR_SUGGESTIONS_TITLE: str = "Clear suggestions"
+CLEAR_SUGGESTIONS_MESSAGE: str = (
+    "Forget every table and field name used so far?\nThis cannot be undone."
+)
+SUGGESTIONS_CLEARED_MESSAGE: str = "Cleared {count} remembered names."
+NO_SUGGESTION_MESSAGE: str = "There was nothing to clear."
+MINIMUM_SUGGESTIONS: int = 1
+MAXIMUM_SUGGESTIONS: int = 100
 THEME_FIELD_WIDTH: int = 220
 CARD_SPACING: int = 6
 ACTION_SPACING: int = 10
@@ -200,12 +216,16 @@ class ConfigTab(Tab):
         super().__init__(title)
         self._repository: ConfigRepository = repository
         self._database: DatabaseManager = database
+        self._hints: RequestHintRepository = RequestHintRepository(database)
         self._expanded_instance_id: int | None = None
         self._cleanup_task: BackgroundTask | None = None
         self.theme_field: QComboBox = QComboBox()
         self.cache_lifetime_field: QSpinBox = QSpinBox()
         self.cleanup_button: QPushButton = QPushButton(CLEANUP_LABEL)
         self.cache_status_label: QLabel = QLabel()
+        self.suggestion_count_field: QSpinBox = QSpinBox()
+        self.clear_suggestions_button: QPushButton = QPushButton(CLEAR_SUGGESTIONS_LABEL)
+        self.suggestion_status_label: QLabel = QLabel()
         self._build_ui()
         self.reload()
 
@@ -228,6 +248,8 @@ class ConfigTab(Tab):
         root.addLayout(self._build_appearance())
         root.addWidget(section_label("Cache"))
         root.addLayout(self._build_cache())
+        root.addWidget(section_label("Suggestions"))
+        root.addLayout(self._build_suggestions())
         root.addWidget(horizontal_rule())
         root.addLayout(self._build_toolbar())
 
@@ -277,6 +299,30 @@ class ConfigTab(Tab):
         layout.addWidget(self.cache_status_label, 1)
         return actions
 
+    def _build_suggestions(self) -> QFormLayout:
+        layout = QFormLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.suggestion_count_field.setFixedWidth(THEME_FIELD_WIDTH)
+        self.suggestion_count_field.setRange(MINIMUM_SUGGESTIONS, MAXIMUM_SUGGESTIONS)
+        self.suggestion_count_field.setKeyboardTracking(False)
+        self.suggestion_count_field.setValue(self._repository.suggestion_count())
+        self.suggestion_count_field.valueChanged.connect(self._on_suggestion_count_changed)
+        layout.addRow(SUGGESTION_COUNT_LABEL, self._build_suggestion_actions())
+        layout.addRow(hint_label(SUGGESTION_HINT))
+        layout.addRow(self.suggestion_status_label)
+        return layout
+
+    def _build_suggestion_actions(self) -> QWidget:
+        actions = QWidget()
+        layout = QHBoxLayout(actions)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(ACTION_SPACING)
+        self.clear_suggestions_button.clicked.connect(self._on_clear_suggestions_clicked)
+        layout.addWidget(self.suggestion_count_field)
+        layout.addWidget(self.clear_suggestions_button)
+        layout.addStretch(1)
+        return actions
+
     def _build_toolbar(self) -> QHBoxLayout:
         toolbar = QHBoxLayout()
         toolbar.addWidget(section_label("Instances"))
@@ -318,6 +364,36 @@ class ConfigTab(Tab):
             self._show_database_error(error)
             return
         show_status(self.cache_status_label, LIFETIME_SAVED_MESSAGE.format(minutes=minutes))
+
+    def _on_suggestion_count_changed(self, count: int) -> None:
+        try:
+            self._repository.set_suggestion_count(count)
+        except (sqlite3.Error, DatabaseError) as error:
+            self._show_database_error(error)
+            return
+        show_status(self.suggestion_status_label, SUGGESTION_SAVED_MESSAGE.format(count=count))
+
+    def _on_clear_suggestions_clicked(self) -> None:
+        confirmed = QMessageBox.question(
+            self,
+            CLEAR_SUGGESTIONS_TITLE,
+            CLEAR_SUGGESTIONS_MESSAGE,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmed != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            cleared = self._hints.clear()
+        except (sqlite3.Error, DatabaseError, TimeoutError) as error:
+            self._show_database_error(error)
+            return
+        show_status(
+            self.suggestion_status_label,
+            SUGGESTIONS_CLEARED_MESSAGE.format(count=cleared)
+            if cleared
+            else NO_SUGGESTION_MESSAGE,
+        )
 
     def _on_cleanup_clicked(self) -> None:
         if self._cleanup_task is not None:

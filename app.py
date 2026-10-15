@@ -14,6 +14,7 @@ from database_manager import DatabaseError, DatabaseManager
 from home_tab import HomeTab
 
 from request_types import RequestType
+from request_hints import RequestHintRepository
 from request_tab import RequestTab
 from request_tabs import create_request_tab
 
@@ -53,6 +54,7 @@ class MainWindow(FramelessWindow):
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.apply_window_theme(theme)
         self.repository: ConfigRepository = repository
+        self.hints: RequestHintRepository = RequestHintRepository(database)
         self.service: RequestService = CachedRequestService(
             instance_service(self), ResponseRepository(database), self
         )
@@ -92,7 +94,9 @@ class MainWindow(FramelessWindow):
 
     def open_new_request_page(self, request_type: RequestType) -> None:
         self._discard_request_page()
-        request_page = create_request_tab(request_type.key, self.service, self.repository)
+        request_page = create_request_tab(
+            request_type.key, self.service, self.repository, self.hints
+        )
         request_page.set_instance_id(self.home_tab.current_instance_id())
         request_page.executed.connect(self.add_response_page)
         request_page.closed.connect(self.close_request_page)

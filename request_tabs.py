@@ -1,9 +1,11 @@
-from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit
+from PySide6.QtWidgets import QFormLayout, QLabel
 
 from config_repository import ConfigRepository
 from filter_fields import RadioChoiceField
+from request_hints import RequestHintRepository
 from query_builder import OPERATOR_CONTAINS, OPERATOR_IS, build_condition
 from request_tab import TABLE_PLACEHOLDER, RequestTab, required_label, required_message
+from suggestion_field import SuggestionField
 from request_types import (
     ACL_LIST,
     BUSINESS_RULE_LIST,
@@ -65,8 +67,13 @@ ACL_FIELD_REQUIRED: str = required_message(ACL_FIELD_LABEL)
 
 class TableRecordsRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(TABLE_RECORDS, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(TABLE_RECORDS, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("number", "short_description", "sys_created_on", "sys_updated_on", "sys_id")
@@ -81,15 +88,20 @@ class TableRecordsRequestTab(RequestTab):
 
 class DictionaryRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(TABLE_DICTIONARY, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(TABLE_DICTIONARY, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("element", "column_label", "internal_type", "max_length", "mandatory", "reference")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_required_text_filter("name", "Table holding the fields", TABLE_PLACEHOLDER)
-        self.add_text_filter("element", "Field name", "Exact field name")
+        self.add_table_filter("name", "Table holding the fields")
+        self.add_field_filter("element", "Field name", "Exact field name")
         self.add_choice_filter("internal_type", "Field type", DICTIONARY_TYPES)
 
     def create_response_tab(self, result: RequestResult) -> ResponseTab:
@@ -98,8 +110,13 @@ class DictionaryRequestTab(RequestTab):
 
 class AclRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(ACL_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(ACL_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "operation", "admin_overrides", "active", "description", "script")
@@ -107,12 +124,10 @@ class AclRequestTab(RequestTab):
     def build_filters(self, layout: QFormLayout) -> None:
         self.scope_field: RadioChoiceField = RadioChoiceField(ACL_SCOPES)
         self.scope_hint: QLabel = hint_label("")
-        self.acl_table_field: QLineEdit = QLineEdit()
-        self.acl_field_field: QLineEdit = QLineEdit()
+        self.acl_table_field: SuggestionField = self.table_suggestion_field()
+        self.acl_field_field: SuggestionField = self.field_suggestion_field()
         self.acl_table_field.setPlaceholderText(TABLE_PLACEHOLDER)
-        self.acl_table_field.setClearButtonEnabled(True)
         self.acl_field_field.setPlaceholderText(ACL_FIELD_PLACEHOLDER)
-        self.acl_field_field.setClearButtonEnabled(True)
         self.add_filter_row(ACL_SCOPE_LABEL, self.scope_field)
         self.add_filter_row("", self.scope_hint)
         self.add_filter_row(required_label(ACL_TABLE_LABEL), self.acl_table_field)
@@ -176,16 +191,21 @@ class AclRequestTab(RequestTab):
 
 class ClientScriptRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(CLIENT_SCRIPT_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(CLIENT_SCRIPT_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "table", "type", "field_name", "ui_type", "active", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_required_text_filter("table", "Table the script runs on", TABLE_PLACEHOLDER)
+        self.add_table_filter("table", "Table the script runs on")
         self.add_choice_filter("type", "Script type", CLIENT_SCRIPT_TYPES)
-        self.add_text_filter("field_name", "Field", "Only for onChange and onCellEdit scripts")
+        self.add_field_filter("field_name", "Field", "Only for onChange and onCellEdit scripts")
         self.add_choice_filter("ui_type", "UI type", CLIENT_SCRIPT_UI_TYPES)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
 
@@ -195,14 +215,19 @@ class ClientScriptRequestTab(RequestTab):
 
 class BusinessRuleRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(BUSINESS_RULE_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(BUSINESS_RULE_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "collection", "when", "order", "action", "active", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_required_text_filter("collection", "Table the rule runs on", TABLE_PLACEHOLDER)
+        self.add_table_filter("collection", "Table the rule runs on")
         self.add_choice_filter("when", "When", BUSINESS_RULE_WHEN)
         self.add_choice_filter("action", "Action", BUSINESS_RULE_ACTIONS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -213,8 +238,13 @@ class BusinessRuleRequestTab(RequestTab):
 
 class ScriptIncludeRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(SCRIPT_INCLUDE_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(SCRIPT_INCLUDE_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "api_name", "client_callable", "access", "active", "script")
@@ -236,18 +266,19 @@ class ScriptIncludeRequestTab(RequestTab):
 
 class DataPolicyRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(DATA_POLICY_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(DATA_POLICY_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("short_description", "model_table", "active", "reverse_if_false", "enforce_ui", "apply_import_set")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_required_text_filter(
-            "model_table",
-            "Table the policy applies to",
-            TABLE_PLACEHOLDER,
-        )
+        self.add_table_filter("model_table", "Table the policy applies to")
         self.add_choice_filter("enforce_ui", "Enforced on the UI", ACTIVE_OPTIONS)
         self.add_choice_filter("apply_import_set", "Applied to import sets", ACTIVE_OPTIONS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -258,14 +289,19 @@ class DataPolicyRequestTab(RequestTab):
 
 class UiPolicyRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(UI_POLICY_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(UI_POLICY_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("short_description", "table", "active", "on_load", "reverse_if_false", "order", "script_true")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_required_text_filter("table", "Table the policy runs on", TABLE_PLACEHOLDER)
+        self.add_table_filter("table", "Table the policy runs on")
         self.add_choice_filter("on_load", "Runs on load", ACTIVE_OPTIONS)
         self.add_choice_filter("reverse_if_false", "Reverses if false", ACTIVE_OPTIONS)
         self.add_choice_filter("active", "Active", ACTIVE_OPTIONS)
@@ -276,14 +312,19 @@ class UiPolicyRequestTab(RequestTab):
 
 class UiActionRequestTab(RequestTab):
 
-    def __init__(self, service: RequestService, repository: ConfigRepository) -> None:
-        super().__init__(UI_ACTION_LIST, service, repository)
+    def __init__(
+        self,
+        service: RequestService,
+        repository: ConfigRepository,
+        hints: RequestHintRepository,
+    ) -> None:
+        super().__init__(UI_ACTION_LIST, service, repository, hints)
 
     def columns(self) -> tuple[str, ...]:
         return ("name", "table", "action_name", "client", "form_button", "list_banner_button", "order", "script")
 
     def build_filters(self, layout: QFormLayout) -> None:
-        self.add_required_text_filter("table", "Table the action belongs to", TABLE_PLACEHOLDER)
+        self.add_table_filter("table", "Table the action belongs to")
         self.add_text_filter("action_name", "Action name", "Internal action name")
         self.add_choice_filter("client", "Client side", ACTIVE_OPTIONS)
         self.add_choice_filter("form_button", "Form button", ACTIVE_OPTIONS)
@@ -307,6 +348,9 @@ REQUEST_TAB_CLASSES: dict[str, type[RequestTab]] = {
 
 
 def create_request_tab(
-    key: str, service: RequestService, repository: ConfigRepository
+    key: str,
+    service: RequestService,
+    repository: ConfigRepository,
+    hints: RequestHintRepository,
 ) -> RequestTab:
-    return REQUEST_TAB_CLASSES[key](service, repository)
+    return REQUEST_TAB_CLASSES[key](service, repository, hints)
