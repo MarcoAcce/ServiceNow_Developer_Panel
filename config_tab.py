@@ -11,14 +11,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from authentication_types import masked_details, type_label
+from background_task import BackgroundTask
 from config_dialogs import AuthenticationDialog, InstanceDialog
 from config_repository import Authentication, ConfigRepository, Instance
-from database_manager import DatabaseError
+from database_manager import DatabaseError, DatabaseManager
 from secret_store import SecretError
 from tab import Tab
 from theme import THEMES
@@ -30,6 +32,7 @@ from ui_widgets import (
     horizontal_rule,
     primary_button,
     section_label,
+    show_status,
     title_label,
     vertical_spacer,
 )
@@ -61,8 +64,24 @@ DUPLICATE_INSTANCE_MESSAGE: str = "An instance named {name} already exists."
 APPEARANCE_HINT: str = (
     "The selected theme is stored in the local database and reused on the next start."
 )
+CACHE_HINT: str = (
+    "Responses are reused for this long before the instance is queried again. The clean up "
+    "deletes the expired responses, their cache files and the cache files nothing refers to."
+)
+CACHE_LIFETIME_LABEL: str = "Expiration"
+CACHE_LIFETIME_SUFFIX: str = " minutes"
+CLEANUP_LABEL: str = "Clean up cache now"
+CLEANUP_RUNNING_MESSAGE: str = "Cleaning up the local cache..."
+CLEANUP_RESULT_MESSAGE: str = (
+    "Removed {responses} expired responses and {files} unused cache files."
+)
+CLEANUP_ERROR_MESSAGE: str = "The clean up failed: {message}"
+LIFETIME_SAVED_MESSAGE: str = "Responses now expire after {minutes} minutes."
+MINIMUM_CACHE_MINUTES: int = 1
+MAXIMUM_CACHE_MINUTES: int = 10080
 THEME_FIELD_WIDTH: int = 220
 CARD_SPACING: int = 6
+ACTION_SPACING: int = 10
 
 
 class AuthenticationRow(QFrame):
@@ -175,11 +194,18 @@ class ConfigTab(Tab):
     configurationChanged = Signal()
     themeChanged = Signal(str)
 
-    def __init__(self, title: str, repository: ConfigRepository) -> None:
+    def __init__(
+        self, title: str, repository: ConfigRepository, database: DatabaseManager
+    ) -> None:
         super().__init__(title)
         self._repository: ConfigRepository = repository
+        self._database: DatabaseManager = database
         self._expanded_instance_id: int | None = None
+        self._cleanup_task: BackgroundTask | None = None
         self.theme_field: QComboBox = QComboBox()
+        self.cache_lifetime_field: QSpinBox = QSpinBox()
+        self.cleanup_button: QPushButton = QPushButton(CLEANUP_LABEL)
+        self.cache_status_label: QLabel = QLabel()
         self._build_ui()
         self.reload()
 
@@ -200,6 +226,8 @@ class ConfigTab(Tab):
         root.addWidget(horizontal_rule())
         root.addWidget(section_label("Appearance"))
         root.addLayout(self._build_appearance())
+        root.addWidget(section_label("Cache"))
+        root.addLayout(self._build_cache())
         root.addWidget(horizontal_rule())
         root.addLayout(self._build_toolbar())
 
@@ -224,6 +252,30 @@ class ConfigTab(Tab):
         layout.addRow(THEME_LABEL, self.theme_field)
         layout.addRow(hint_label(APPEARANCE_HINT))
         return layout
+
+    def _build_cache(self) -> QFormLayout:
+        layout = QFormLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.cache_lifetime_field.setFixedWidth(THEME_FIELD_WIDTH)
+        self.cache_lifetime_field.setRange(MINIMUM_CACHE_MINUTES, MAXIMUM_CACHE_MINUTES)
+        self.cache_lifetime_field.setSuffix(CACHE_LIFETIME_SUFFIX)
+        self.cache_lifetime_field.setKeyboardTracking(False)
+        self.cache_lifetime_field.setValue(self._repository.cache_lifetime_minutes())
+        self.cache_lifetime_field.valueChanged.connect(self._on_cache_lifetime_changed)
+        layout.addRow(CACHE_LIFETIME_LABEL, self.cache_lifetime_field)
+        layout.addRow(hint_label(CACHE_HINT))
+        layout.addRow(self._build_cache_actions())
+        return layout
+
+    def _build_cache_actions(self) -> QWidget:
+        actions = QWidget()
+        layout = QHBoxLayout(actions)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(ACTION_SPACING)
+        self.cleanup_button.clicked.connect(self._on_cleanup_clicked)
+        layout.addWidget(self.cleanup_button)
+        layout.addWidget(self.cache_status_label, 1)
+        return actions
 
     def _build_toolbar(self) -> QHBoxLayout:
         toolbar = QHBoxLayout()
@@ -258,6 +310,52 @@ class ConfigTab(Tab):
             self._show_database_error(error)
             return
         self.themeChanged.emit(key)
+
+    def _on_cache_lifetime_changed(self, minutes: int) -> None:
+        try:
+            self._repository.set_cache_lifetime_minutes(minutes)
+        except (sqlite3.Error, DatabaseError) as error:
+            self._show_database_error(error)
+            return
+        show_status(self.cache_status_label, LIFETIME_SAVED_MESSAGE.format(minutes=minutes))
+
+    def _on_cleanup_clicked(self) -> None:
+        if self._cleanup_task is not None:
+            return
+        self.cleanup_button.setEnabled(False)
+        show_status(self.cache_status_label, CLEANUP_RUNNING_MESSAGE)
+        task = BackgroundTask(self._clean_up_cache, self)
+        task.finished.connect(self._on_cleanup_finished)
+        task.failed.connect(self._on_cleanup_failed)
+        self._cleanup_task = task
+        task.start()
+
+    def _clean_up_cache(self) -> tuple[int, int]:
+        responses = self._database.purge_expired_responses()
+        return responses, self._database.purge_orphan_caches()
+
+    def _on_cleanup_finished(self, counts: object) -> None:
+        self._release_cleanup()
+        responses, files = counts if isinstance(counts, tuple) else (0, 0)
+        show_status(
+            self.cache_status_label,
+            CLEANUP_RESULT_MESSAGE.format(responses=responses, files=files),
+        )
+
+    def _on_cleanup_failed(self, message: str) -> None:
+        self._release_cleanup()
+        show_status(
+            self.cache_status_label,
+            CLEANUP_ERROR_MESSAGE.format(message=message),
+            failed=True,
+        )
+
+    def _release_cleanup(self) -> None:
+        task = self._cleanup_task
+        self._cleanup_task = None
+        if task is not None:
+            task.deleteLater()
+        self.cleanup_button.setEnabled(True)
 
     def _on_expand(self, instance: Instance) -> None:
         self._expanded_instance_id = instance.id

@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 from authentication_types import AuthenticationType, authentication_type_of_key
 from database_manager import (
+    CACHE_LIFETIME_SETTING,
     CURRENT_INSTANCE_SETTING,
     DEFAULT_THEME_KEY,
     THEME_SETTING,
@@ -81,6 +82,12 @@ class ConfigRepository:
 
     def set_theme_key(self, key: str) -> None:
         self.set_configuration_value(THEME_SETTING, key)
+
+    def cache_lifetime_minutes(self) -> int:
+        return self._database.cache_lifetime_minutes()
+
+    def set_cache_lifetime_minutes(self, minutes: int) -> None:
+        self.set_configuration_value(CACHE_LIFETIME_SETTING, str(minutes))
 
     def current_instance_id(self) -> int:
         value = self.configuration_value(CURRENT_INSTANCE_SETTING, "")

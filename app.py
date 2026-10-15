@@ -1,3 +1,6 @@
+import sqlite3
+
+from PySide6.QtCore import QThreadPool
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
@@ -7,17 +10,20 @@ from sidebar import Sidebar
 from tab import Tab
 from config_repository import ConfigRepository
 from config_tab import ConfigTab
-from database_manager import DatabaseManager
+from database_manager import DatabaseError, DatabaseManager
 from home_tab import HomeTab
 
 from request_types import RequestType
 from request_tab import RequestTab
 from request_tabs import create_request_tab
 
+from response_repository import ResponseRepository
 from response_tab import ResponseTab
 
 from service import RequestCall, RequestError, RequestResult, RequestService
+from cached_service import CachedRequestService
 from dummy_service import DummyRequestService
+from http_service import HttpRequestService
 
 from theme import Theme, apply_theme, theme_of_key
 from window_frame import FramelessWindow
@@ -26,21 +32,33 @@ APPLICATION_NAME: str = "ServiceNow Developer Panel"
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
 WINDOW_HEIGHT: int = 820
+TASK_SHUTDOWN_TIMEOUT_MS: int = 15000
+USE_DUMMY_SERVICE: bool = False
+
+
+def instance_service(parent: QWidget) -> RequestService:
+    if USE_DUMMY_SERVICE:
+        return DummyRequestService(parent)
+    return HttpRequestService(parent)
 
 
 class MainWindow(FramelessWindow):
 
-    def __init__(self, repository: ConfigRepository, theme: Theme) -> None:
+    def __init__(
+        self, repository: ConfigRepository, database: DatabaseManager, theme: Theme
+    ) -> None:
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(QIcon(str(icon_path())))
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.apply_window_theme(theme)
         self.repository: ConfigRepository = repository
-        self.service: RequestService = DummyRequestService(self)
+        self.service: RequestService = CachedRequestService(
+            instance_service(self), ResponseRepository(database), self
+        )
         self.sidebar: Sidebar = Sidebar()
         self.home_tab: HomeTab = HomeTab("Home", repository)
-        self.config_tab: ConfigTab = ConfigTab("Configuration", repository)
+        self.config_tab: ConfigTab = ConfigTab("Configuration", repository, database)
         self.response_tabs: list[ResponseTab] = []
         self._current_page: Tab | None = None
         self._request_page: Tab | None = None
@@ -97,7 +115,7 @@ class MainWindow(FramelessWindow):
         if self._busy or not isinstance(page, ResponseTab):
             return
         self._refresh_page = page
-        self._refresh_call = self.service.send(page.result.request)
+        self._refresh_call = self.service.send(page.result.request.refreshed())
         self._refresh_call.succeeded.connect(self._on_refresh_succeeded)
         self._refresh_call.failed.connect(self._on_refresh_failed)
         page.set_refreshing(True)
@@ -194,9 +212,18 @@ class MainWindow(FramelessWindow):
         request_page.deleteLater()
 
 
+def purge_expired_cache(database: DatabaseManager) -> None:
+    try:
+        database.purge_expired_responses()
+        database.purge_orphan_caches()
+    except (DatabaseError, OSError, TimeoutError, sqlite3.Error):
+        return
+
+
 def main() -> None:
     database = DatabaseManager.instance()
     try:
+        purge_expired_cache(database)
         app = QApplication([])
         app.setApplicationName(APPLICATION_NAME)
         app.setApplicationDisplayName(APPLICATION_NAME)
@@ -204,10 +231,11 @@ def main() -> None:
         repository = ConfigRepository(database)
         theme = theme_of_key(repository.theme_key())
         apply_theme(app, theme)
-        window = MainWindow(repository, theme)
+        window = MainWindow(repository, database, theme)
         window.show()
         app.exec()
     finally:
+        QThreadPool.globalInstance().waitForDone(TASK_SHUTDOWN_TIMEOUT_MS)
         database.close()
 
 
