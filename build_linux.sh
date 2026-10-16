@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PYTHON="${PYTHON:-virtual_environment/bin/python}"
-APPLICATION_NAME="ServiceNowDeveloperPanel"
+SETUP_NAME="ServiceNowDeveloperPanelSetup"
 
 if [ ! -x "$PYTHON" ]; then
     echo "Python interpreter not found: $PYTHON" >&2
@@ -18,15 +18,7 @@ if ! "$PYTHON" -c "import PyInstaller" >/dev/null 2>&1; then
     exit 1
 fi
 
-"$PYTHON" -m PyInstaller \
-    --noconfirm \
-    --clean \
-    --onefile \
-    --windowed \
-    --name "$APPLICATION_NAME" \
-    --add-data "fonts:fonts" \
-    --add-data "assets:assets" \
-    --icon assets/icon.ico \
-    app.py
+"$PYTHON" -m PyInstaller --noconfirm --clean packaging/panel.spec
+"$PYTHON" -m PyInstaller --noconfirm --clean packaging/installer.spec
 
-echo "Built dist/$APPLICATION_NAME"
+echo "Built dist/$SETUP_NAME"

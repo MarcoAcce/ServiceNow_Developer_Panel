@@ -4,7 +4,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
-from core.app_paths import icon_path
+from core.app_paths import APPLICATION_DIRECTORY_NAME, icon_path
 from ui.icons import refresh_icon_widgets
 from ui.sidebar import Sidebar
 from ui.tab import Tab
@@ -239,6 +239,7 @@ def main() -> None:
         app = QApplication([])
         app.setApplicationName(APPLICATION_NAME)
         app.setApplicationDisplayName(APPLICATION_NAME)
+        app.setDesktopFileName(APPLICATION_DIRECTORY_NAME)
         app.setWindowIcon(QIcon(str(icon_path())))
         repository = ConfigRepository(database)
         theme = theme_of_key(repository.theme_key())
