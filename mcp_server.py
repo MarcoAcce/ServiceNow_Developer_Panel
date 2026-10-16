@@ -3,8 +3,8 @@ from collections.abc import Callable
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
-from database_manager import DatabaseManager
-from mcp_session import McpSession
+from core.database_manager import DatabaseManager
+from services.mcp_session import McpSession
 
 SERVER_NAME: str = "servicenow-developer-panel"
 SERVER_INSTRUCTIONS: str = (
