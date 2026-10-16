@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -34,11 +35,17 @@ OPERATOR_STARTS_WITH: QueryOperator = OPERATORS[2]
 OPERATOR_CONTAINS: QueryOperator = OPERATORS[4]
 OPERATOR_IS_ONE_OF: QueryOperator = OPERATORS[6]
 OPERATOR_ON_OR_AFTER: QueryOperator = OPERATORS[9]
+OPERATOR_IS_NOT_EMPTY: QueryOperator = OPERATORS[13]
 
 AND_SEPARATOR: str = "^"
 OR_SEPARATOR: str = "^OR"
 OPEN_PAREN: str = "("
 CLOSE_PAREN: str = ")"
+ESCAPED_SEPARATOR: str = "^^"
+ESCAPED_PLACEHOLDER: str = " "
+QUERY_FIELD_PATTERN: re.Pattern[str] = re.compile(
+    r"(?:NQ|OR|ORDERBYDESC|ORDERBY|GOTO)?([a-z][a-z0-9_]*)"
+)
 
 
 def build_condition(field: str, operator: QueryOperator, value: str) -> str:
@@ -58,3 +65,13 @@ def encode_groups(groups: Iterable[Iterable[str]]) -> str:
         if conditions:
             encoded.append(OR_SEPARATOR.join(conditions))
     return AND_SEPARATOR.join(encoded)
+
+
+def query_fields(query: str) -> tuple[str, ...]:
+    fields: dict[str, None] = {}
+    escaped = query.replace(ESCAPED_SEPARATOR, ESCAPED_PLACEHOLDER)
+    for condition in escaped.split(AND_SEPARATOR):
+        match = QUERY_FIELD_PATTERN.match(condition.strip())
+        if match:
+            fields.setdefault(match.group(1), None)
+    return tuple(fields)

@@ -16,19 +16,43 @@ from core.app_paths import cache_path, data_directory
 from storage.cache_query import run_script
 from configuration.config_repository import ConfigRepository, Instance
 from core.database_manager import RESPONSE_TIME_FORMAT, DatabaseError, DatabaseManager
+from core.query_conditions import query_fields
 from core.record_columns import ordered_columns
 from core.request_model import (
+    LIMIT_PARAMETER,
     MAXIMUM_LIMIT,
+    QUERY_PARAMETER,
     RequestPart,
     RequestResult,
     RequestSpec,
     RequestTarget,
+    ResultSection,
+    requested_fields,
     table_parameters,
     tables_problem,
 )
 from core.request_types import MULTIPLE_TABLES, TABLE_RECORDS
+from core.table_dictionary import (
+    HIERARCHY_DEPTH,
+    MAXIMUM_PARENTS,
+    NAME_FIELD,
+    FieldDescription,
+    description_request,
+    description_root,
+    field_descriptions,
+    hierarchy_request,
+    matches_description,
+    parent_names,
+    table_chain,
+    table_label,
+)
 from storage.response_cache import cache_names, cache_row_counts, read_cache_tables
-from storage.response_repository import ResponseRepository, received_at_of
+from storage.response_repository import (
+    ResponseCacheError,
+    ResponseRepository,
+    received_at_of,
+    request_parts,
+)
 from services.sync_service import RequestFailure, SyncRequestService, mcp_target
 from storage.table_export import CSV_FORMAT, XLSX_SUFFIX, export_csv, export_xlsx
 
@@ -47,7 +71,10 @@ INSTANCE_DESCRIPTION: str = "Name of a configured instance, as returned by list_
 TABLE_DESCRIPTION: str = "ServiceNow table name, for example incident or sys_user."
 QUERY_DESCRIPTION: str = (
     "Encoded query passed as sysparm_query, for example active=true^priority=1. "
-    "Empty returns every record up to the limit."
+    "Empty returns every record up to the limit. ServiceNow ignores conditions on fields the "
+    "table does not have and returns the records unfiltered, so use the exact field names, as "
+    "listed by describe_table: for example business rules in sys_script name their table in "
+    "collection, not table."
 )
 FIELDS_DESCRIPTION: str = (
     "Field names passed as sysparm_fields. Dot-walking is allowed, for example caller_id.name. "
@@ -55,7 +82,9 @@ FIELDS_DESCRIPTION: str = (
 )
 ORDER_DESCRIPTION: str = "Field name passed as sysparm_order_by. Empty keeps the instance order."
 LIMIT_DESCRIPTION: str = (
-    "Maximum number of records to fetch. Above 10000 the request is split into several calls."
+    "Maximum number of records to fetch, 100 when omitted. When exactly this many records come "
+    "back, limit_reached is true and more records probably match: ask again with a higher "
+    "limit. Above 10000 the request is split into several calls."
 )
 SAMPLE_DESCRIPTION: str = (
     "How many of the fetched records to return in this response. The full result stays in the "
@@ -64,15 +93,28 @@ SAMPLE_DESCRIPTION: str = (
 REFRESH_DESCRIPTION: str = (
     "Skip the local cache and ask the instance again. Leave false to reuse a recent response."
 )
-TABLES_DESCRIPTION: str = "The tables to fetch, each with its own query, fields and limit."
+TABLES_DESCRIPTION: str = (
+    "The tables to fetch, each with its own query, fields and limit. Each table can appear "
+    "only once: combine conditions with ^OR or IN instead."
+)
+ADDED_TABLES_DESCRIPTION: str = (
+    "The tables to add, each with its own query, fields and limit. A table already in the "
+    "cached response cannot be added again."
+)
 CACHE_NAME_DESCRIPTION: str = (
     "The cache_name returned by a request tool or by list_cached_responses."
 )
+TABLES_CACHE_NAME_DESCRIPTION: str = (
+    "The cache_name returned by request_tables or add_tables, or listed by "
+    "list_cached_responses with request_type multiple_tables."
+)
 SQL_DESCRIPTION: str = (
     "SQLite statements, separated by semicolons. Every cached ServiceNow table is a SQLite table "
-    "with the same name and TEXT columns; quote names containing dots, for example "
-    "\"caller_id.name\". Only the last statement that returns rows is returned. The cache is "
-    "read-only, TEMP tables are allowed."
+    "with the same name and TEXT columns. Reference fields hold the sys_id of the referenced "
+    "record: join on it, or request dot-walked fields such as group.name. Double-quote column "
+    "names that contain dots or are SQL keywords, for example \"caller_id.name\", \"group\", "
+    "\"order\" and \"when\". Only the last statement that returns rows is returned. The cache "
+    "is read-only, TEMP tables are allowed."
 )
 FORMAT_DESCRIPTION: str = "csv writes one file per table, xlsx one workbook with a sheet per table."
 DESTINATION_DESCRIPTION: str = (
@@ -83,9 +125,15 @@ FIELD_DESCRIPTION: str = (
     "Optional field name, to verify field level controls. Only for the read and update operations."
 )
 PROFILES_DESCRIPTION: str = (
-    "One list of role names per user to check, for example [[\"itil\"], [\"admin\"]]. A user "
-    "passes a control when any of its roles is required by the control. Roles are compared "
+    "One list of role names per user to check, for example [[\"itil\", \"snc_internal\"], "
+    "[\"admin\"]]. List every role the user holds, including snc_internal and the roles "
+    "contained in other roles: none is added automatically. A user passes a control when any "
+    "of its roles is required by the control. Empty lists are ignored. Roles are compared "
     "locally and never sent to the instance."
+)
+DESCRIBED_FIELDS_DESCRIPTION: str = (
+    "Only describe these fields, for example [\"state\", \"caller_id\"]. Empty describes every "
+    "field of the table."
 )
 RESPONSE_COUNT_DESCRIPTION: str = "Maximum number of cached responses to list, most recent first."
 
@@ -110,6 +158,37 @@ FIELD_OPERATION_MESSAGE: str = "A field can only be verified for the read and up
 ROLES_REQUIRED_MESSAGE: str = "At least one profile with one role name is required."
 QUERY_FAILED_MESSAGE: str = "The query failed: {error}"
 LOCAL_FAILURE_MESSAGE: str = "The local database or cache could not be used: {error}"
+NOT_MULTIPLE_TABLES_MESSAGE: str = (
+    "The cached response {name} was not made by request_tables, so tables cannot be added to "
+    "it. Use request_tables to fetch every table you need into one cached response."
+)
+MISSING_INSTANCE_MESSAGE: str = (
+    "The instance of the cached response {name} is no longer configured."
+)
+EXPIRED_NOTE: str = (
+    "The cached response {old} is no longer current, so every table was requested again into "
+    "{new}. Use {new} from now on."
+)
+LIMIT_WARNING: str = (
+    "{table}: {count} records were fetched, as many as the limit, so more records probably "
+    "match. Ask again with a higher limit to get them all."
+)
+MISSING_FIELDS_WARNING: str = (
+    "{table}: the requested fields {fields} are not in the response: the table does not have "
+    "them, or they cannot be read. describe_table lists the fields of the table."
+)
+IGNORED_CONDITIONS_WARNING: str = (
+    "{table}: the query uses {fields}, which the returned records do not have. ServiceNow "
+    "ignores conditions on unknown fields, so these records are probably not filtered. Check "
+    "the field names with describe_table and ask again."
+)
+UNKNOWN_FIELDS_WARNING: str = "{table}: there is no active field named {fields}."
+UNKNOWN_TABLE_MESSAGE: str = (
+    "There is no table named {table} on {instance}, or the MCP user cannot read sys_db_object. "
+    "Table names are lowercase, and the tables of a custom application start with its scope, "
+    "for example x_acme_app_request. To find a table by its label, use request_table on "
+    "sys_db_object with a query such as labelLIKErequest."
+)
 
 Operation = Literal["create", "read", "update", "delete"]
 ExportFormat = Literal["csv", "xlsx"]
@@ -146,14 +225,19 @@ class TableResult(TypedDict):
     executed_at: str
     elapsed_ms: int
     row_count: int
+    limit: int
+    limit_reached: bool
     columns: list[str]
     records: list[dict[str, str]]
-    truncated: bool
+    sample_truncated: bool
+    warnings: list[str]
 
 
 class SectionSummary(TypedDict):
     table: str
     row_count: int
+    limit: int
+    limit_reached: bool
     columns: list[str]
 
 
@@ -164,6 +248,19 @@ class TablesResult(TypedDict):
     elapsed_ms: int
     row_count: int
     sections: list[SectionSummary]
+    warnings: list[str]
+
+
+class TableDescription(TypedDict):
+    cache_name: str
+    source: str
+    executed_at: str
+    table: str
+    label: str
+    extends: list[str]
+    field_count: int
+    fields: list[FieldDescription]
+    warnings: list[str]
 
 
 class QueryResult(TypedDict):
@@ -261,16 +358,77 @@ class McpSession:
             problem = tables_problem([entry["table"] for entry in tables])
             if problem:
                 raise ToolError(problem)
-            request = RequestSpec(
-                request_type=MULTIPLE_TABLES,
-                table="",
-                parameters={},
-                columns=(),
-                target=self._target(instance),
-                parts=tuple(part_of_query(entry) for entry in tables),
-            )
+            parts = tuple(part_of_query(entry) for entry in tables)
+            request = tables_request(self._target(instance), parts)
             result = self._send(request.refreshed() if refresh else request)
             return tables_result(result)
+
+    def add_tables(
+        self,
+        cache_name: Annotated[str, Field(description=TABLES_CACHE_NAME_DESCRIPTION, min_length=1)],
+        tables: Annotated[
+            list[TableQuery], Field(description=ADDED_TABLES_DESCRIPTION, min_length=1)
+        ],
+    ) -> TablesResult:
+        with local_failures():
+            name = checked_cache_name(cache_name)
+            row = self._responses.find(name)
+            existing = request_parts(row) if row is not None else ()
+            if row is None or str(row["request_type"]) != MULTIPLE_TABLES.key or not existing:
+                raise ToolError(NOT_MULTIPLE_TABLES_MESSAGE.format(name=name))
+            added = tuple(part_of_query(entry) for entry in tables)
+            problem = tables_problem([part.table for part in existing + added])
+            if problem:
+                raise ToolError(problem)
+            instance = self._instance_with_id(int(row["instance_id"]), name)
+            request = tables_request(self._checked_target(instance), existing)
+            stored = self._responses.load_named(request, name, received_at_of(row))
+            if stored is None or not self._responses.is_current(stored):
+                result = self._send(tables_request(request.target, existing + added).refreshed())
+                note = EXPIRED_NOTE.format(old=name, new=result.cache_name)
+                return tables_result(result, (note,))
+            fetched = self._send(tables_request(request.target, added).transient())
+            for section in fetched.sections:
+                stored = self._extended(stored, section)
+            return tables_result(stored)
+
+    def describe_table(
+        self,
+        instance: InstanceName,
+        table: TableName,
+        fields: Annotated[tuple[str, ...], Field(description=DESCRIBED_FIELDS_DESCRIPTION)] = (),
+        refresh: Refresh = False,
+    ) -> TableDescription:
+        with local_failures():
+            target = self._target(instance)
+            name = table.strip().lower()
+            root = description_root(name, target)
+            result = None if refresh else self._responses.load_latest(root)
+            if result is None or not matches_description(result):
+                request = description_request(self._hierarchy(name, target), target)
+                result = self._send(request.refreshed())
+            wanted = cleaned_names(fields)
+            described = field_descriptions(result, wanted)
+            warnings = sections_warnings(result)
+            found = {field["name"] for field in described}
+            missing = [field for field in wanted if field not in found]
+            if missing:
+                warnings.append(
+                    UNKNOWN_FIELDS_WARNING.format(
+                        table=result.table, fields=NAME_SEPARATOR.join(missing)
+                    )
+                )
+            return TableDescription(
+                cache_name=result.cache_name,
+                source=result.source,
+                executed_at=result.executed_at.strftime(RESPONSE_TIME_FORMAT),
+                table=result.table,
+                label=table_label(result),
+                extends=list(table_chain(result)[1:]),
+                field_count=len(described),
+                fields=described,
+                warnings=warnings,
+            )
 
     def query_cache(
         self,
@@ -375,7 +533,9 @@ class McpSession:
             return payloads
 
     def _target(self, name: str) -> RequestTarget:
-        instance = self._instance(name)
+        return self._checked_target(self._instance(name))
+
+    def _checked_target(self, instance: Instance) -> RequestTarget:
         target = mcp_target(self._repository, instance)
         authentication = target.authentication
         if authentication is None:
@@ -394,6 +554,30 @@ class McpSession:
         raise ToolError(
             UNKNOWN_INSTANCE_MESSAGE.format(name=name, available=available or NO_INSTANCES_LABEL)
         )
+
+    def _hierarchy(self, table: str, target: RequestTarget) -> tuple[str, ...]:
+        records = self._send(hierarchy_request(table, target)).records
+        if not records:
+            raise ToolError(UNKNOWN_TABLE_MESSAGE.format(table=table, instance=target.label))
+        found = parent_names(records[0])
+        parents = list(found)
+        while len(found) == HIERARCHY_DEPTH and len(parents) < MAXIMUM_PARENTS:
+            ancestors = self._send(hierarchy_request(found[-1], target)).records
+            found = parent_names(ancestors[0]) if ancestors else ()
+            parents.extend(found)
+        return (records[0].get(NAME_FIELD, "").strip() or table, *parents)
+
+    def _instance_with_id(self, instance_id: int, cache_name: str) -> Instance:
+        for instance in self._repository.list_instances():
+            if instance.id == instance_id:
+                return instance
+        raise ToolError(MISSING_INSTANCE_MESSAGE.format(name=cache_name))
+
+    def _extended(self, result: RequestResult, section: ResultSection) -> RequestResult:
+        try:
+            return self._responses.extend(result, section)
+        except ResponseCacheError as error:
+            raise ToolError(LOCAL_FAILURE_MESSAGE.format(error=error)) from None
 
     def _send(self, request: RequestSpec) -> RequestResult:
         try:
@@ -433,6 +617,17 @@ def part_of_query(entry: TableQuery) -> RequestPart:
     )
 
 
+def tables_request(target: RequestTarget, parts: tuple[RequestPart, ...]) -> RequestSpec:
+    return RequestSpec(
+        request_type=MULTIPLE_TABLES,
+        table="",
+        parameters={},
+        columns=(),
+        target=target,
+        parts=parts,
+    )
+
+
 def table_result(result: RequestResult, sample: int) -> TableResult:
     return TableResult(
         cache_name=result.cache_name,
@@ -441,13 +636,16 @@ def table_result(result: RequestResult, sample: int) -> TableResult:
         executed_at=result.executed_at.strftime(RESPONSE_TIME_FORMAT),
         elapsed_ms=result.elapsed_ms,
         row_count=len(result.records),
+        limit=limit_of(result.parameters),
+        limit_reached=limit_reached(result.parameters, result.records),
         columns=list(ordered_columns(result.columns, result.records)),
         records=result.records[:sample],
-        truncated=len(result.records) > sample,
+        sample_truncated=len(result.records) > sample,
+        warnings=record_warnings(result.table, result.parameters, result.records),
     )
 
 
-def tables_result(result: RequestResult) -> TablesResult:
+def tables_result(result: RequestResult, notes: Sequence[str] = ()) -> TablesResult:
     return TablesResult(
         cache_name=result.cache_name,
         source=result.source,
@@ -458,11 +656,58 @@ def tables_result(result: RequestResult) -> TablesResult:
             SectionSummary(
                 table=section.table,
                 row_count=len(section.records),
+                limit=limit_of(section.parameters),
+                limit_reached=limit_reached(section.parameters, section.records),
                 columns=list(ordered_columns(section.columns, section.records)),
             )
             for section in result.sections
         ],
+        warnings=[*notes, *sections_warnings(result)],
     )
+
+
+def sections_warnings(result: RequestResult) -> list[str]:
+    warnings: list[str] = []
+    for section in result.sections:
+        warnings.extend(record_warnings(section.table, section.parameters, section.records))
+    return warnings
+
+
+def limit_of(parameters: dict[str, str]) -> int:
+    value = parameters.get(LIMIT_PARAMETER, "").strip()
+    return int(value) if value.isdigit() else 0
+
+
+def limit_reached(parameters: dict[str, str], records: Sequence[dict[str, str]]) -> bool:
+    limit = limit_of(parameters)
+    return 0 < limit <= len(records)
+
+
+def record_warnings(
+    table: str, parameters: dict[str, str], records: Sequence[dict[str, str]]
+) -> list[str]:
+    warnings: list[str] = []
+    if limit_reached(parameters, records):
+        warnings.append(LIMIT_WARNING.format(table=table, count=len(records)))
+    if not records:
+        return warnings
+    received = {name for record in records for name in record}
+    fields = requested_fields(parameters)
+    missing = [name for name in fields if name not in received]
+    if missing:
+        warnings.append(
+            MISSING_FIELDS_WARNING.format(table=table, fields=NAME_SEPARATOR.join(missing))
+        )
+    if not fields:
+        query = parameters.get(QUERY_PARAMETER, "")
+        unknown = [name for name in query_fields(query) if name not in received]
+        if unknown:
+            warnings.append(
+                IGNORED_CONDITIONS_WARNING.format(
+                    table=table, fields=NAME_SEPARATOR.join(unknown)
+                )
+            )
+    return warnings
 
 
 def checked_cache_name(name: str) -> str:

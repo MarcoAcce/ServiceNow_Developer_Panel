@@ -8,8 +8,10 @@ SHUTDOWN_TIMEOUT_SECONDS: int = 10
 EXPECTED_TOOLS: frozenset[str] = frozenset(
     {
         "list_instances",
+        "describe_table",
         "request_table",
         "request_tables",
+        "add_tables",
         "query_cache",
         "export_cache",
         "verify_acl",

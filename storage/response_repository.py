@@ -2,6 +2,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from typing import Any
 
 from core.database_manager import RESPONSE_TIME_FORMAT, DatabaseManager
 from storage.response_cache import (
@@ -15,7 +16,14 @@ from storage.response_cache import (
     read_cache_tables,
     write_cache_tables,
 )
-from core.request_model import RequestResult, RequestSpec, ResultSection, part_of
+from core.request_model import (
+    RequestPart,
+    RequestResult,
+    RequestSpec,
+    ResultSection,
+    part_of,
+    requested_fields,
+)
 
 RESPONSE_INSERT: str = (
     "INSERT INTO response "
@@ -36,10 +44,20 @@ CURRENT_QUERY: str = (
     "SELECT id FROM response WHERE cache_name = ? AND received_at > ? LIMIT 1"
 )
 DETAILS_UPDATE: str = "UPDATE response SET request_details = ? WHERE cache_name = ?"
+LATEST_QUERY: str = (
+    "SELECT id, instance_id, request_type, received_at, request_details, cache_name "
+    "FROM response WHERE instance_id = ? AND request_type = ? AND received_at > ? "
+    "ORDER BY received_at DESC, id DESC"
+)
+NAMED_QUERY: str = (
+    "SELECT id, instance_id, request_type, received_at, request_details, cache_name "
+    "FROM response WHERE cache_name = ? ORDER BY received_at DESC, id DESC LIMIT 1"
+)
 TABLE_KEY: str = "table"
 PARAMETERS_KEY: str = "parameters"
 PARTS_KEY: str = "parts"
 NO_RESPONSE_ID: int = 0
+NO_ELAPSED_MS: int = 0
 CACHE_STATUS_CODE: int = 200
 CACHE_SOURCE: str = "local cache of {received_at}"
 EXTEND_FAILED_MESSAGE: str = "the local cache of this response cannot be extended"
@@ -60,6 +78,30 @@ def request_details(request: RequestSpec) -> str:
             for part in request.parts
         ]
     return json.dumps(details, separators=(",", ":"), sort_keys=True)
+
+
+def stored_details(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        details = json.loads(str(row["request_details"]))
+    except ValueError:
+        return {}
+    return details if isinstance(details, dict) else {}
+
+
+def request_parts(row: sqlite3.Row) -> tuple[RequestPart, ...]:
+    parts: list[RequestPart] = []
+    for entry in stored_details(row).get(PARTS_KEY, ()):
+        parameters = {
+            str(name): str(value) for name, value in entry.get(PARAMETERS_KEY, {}).items()
+        }
+        parts.append(
+            RequestPart(
+                table=str(entry.get(TABLE_KEY, "")),
+                parameters=parameters,
+                columns=requested_fields(parameters),
+            )
+        )
+    return tuple(parts)
 
 
 def cache_tables_of(result: RequestResult) -> tuple[CacheTable, ...]:
@@ -158,6 +200,37 @@ class ResponseRepository:
         return CachedResponse(
             records=records, executed_at=received_at_of(row), cache_name=name
         )
+
+    def find(self, name: str) -> sqlite3.Row | None:
+        return self._database.query_one(NAMED_QUERY, (name,))
+
+    def load_named(
+        self, request: RequestSpec, name: str, executed_at: datetime
+    ) -> RequestResult | None:
+        cached = self._load_sections(request, name, executed_at)
+        if cached is None:
+            return None
+        return cached_result(request, cached, NO_ELAPSED_MS)
+
+    def load_latest(self, request: RequestSpec) -> RequestResult | None:
+        instance = request.target.instance
+        if instance is None or request.skip_cache:
+            return None
+        rows = self._database.query(
+            LATEST_QUERY,
+            (instance.id, request.request_type.key, self._expiry_cutoff()),
+        )
+        for row in rows:
+            details = stored_details(row)
+            if details.get(TABLE_KEY) != request.table:
+                continue
+            if details.get(PARAMETERS_KEY) != request.parameters:
+                continue
+            parts = request_parts(row)
+            if parts:
+                name = str(row["cache_name"])
+                return self.load_named(replace(request, parts=parts), name, received_at_of(row))
+        return None
 
     def is_current(self, result: RequestResult) -> bool:
         name = result.cache_name

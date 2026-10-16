@@ -243,6 +243,11 @@ def table_parameters(
     return parameters
 
 
+def requested_fields(parameters: dict[str, str]) -> tuple[str, ...]:
+    fields = parameters.get(FIELDS_PARAMETER, "").split(FIELD_SEPARATOR)
+    return tuple(name.strip() for name in fields if name.strip())
+
+
 def tables_problem(tables: Sequence[str]) -> str:
     if not tables:
         return TABLES_REQUIRED_MESSAGE
