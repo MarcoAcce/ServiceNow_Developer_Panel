@@ -25,6 +25,9 @@ Note: Your credentials are only saved locally and sent to ServiceNow to authenti
 - [Database](docs/database.md): what is stored locally and where, how responses are reused and when they expire.
 - [MCP](docs/mcp.md): the MCP server and its tools.
 
+Each release includes two setup executables, for Windows and for Linux. 
+Simply download the setup for your system and run it to install the application (portable ~180MB, but you can build the project yourself to save storage). 
+
 # Code stuff
 
 This project is written entirely in Python. 
