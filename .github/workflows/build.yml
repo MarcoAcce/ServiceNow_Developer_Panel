@@ -1,0 +1,187 @@
+name: Build setup
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install the Qt system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libfontconfig1 libdbus-1-3 libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+
+      - name: Create the virtual environment
+        run: |
+          python -m venv virtual_environment
+          virtual_environment/bin/python -m pip install -r requirements.txt
+
+      - name: Build
+        run: ./build_linux.sh
+
+      - name: Install with the setup
+        run: |
+          mkdir -p "$HOME/Desktop"
+          dist/ServiceNowDeveloperPanelSetup --silent --desktop
+          echo "INSTALL_DIR=$HOME/.local/opt/ServiceNowDeveloperPanel" >> "$GITHUB_ENV"
+
+      - name: Check the installation
+        run: |
+          for path in \
+            "$INSTALL_DIR/ServiceNowDeveloperPanel" \
+            "$INSTALL_DIR/ServiceNowDeveloperPanelMcp" \
+            "$INSTALL_DIR/mcp.json" \
+            "$INSTALL_DIR/data" \
+            "$HOME/.local/share/applications/ServiceNowDeveloperPanel.desktop" \
+            "$HOME/Desktop/ServiceNowDeveloperPanel.desktop"
+          do
+            test -e "$path" || { echo "Missing $path"; exit 1; }
+          done
+
+      - name: Start the application
+        run: |
+          status=0
+          timeout 15 "$INSTALL_DIR/ServiceNowDeveloperPanel" || status=$?
+          if [ "$status" -ne 124 ]; then
+            echo "The application exited with code $status"
+            exit 1
+          fi
+
+      - name: Test the MCP server
+        timeout-minutes: 2
+        run: python .github/scripts/mcp_smoke_test.py "$INSTALL_DIR/ServiceNowDeveloperPanelMcp"
+
+      - name: Uninstall with the setup
+        run: |
+          dist/ServiceNowDeveloperPanelSetup --silent --uninstall --remove-data
+          test ! -e "$INSTALL_DIR"
+          test ! -e "$HOME/.local/share/applications/ServiceNowDeveloperPanel.desktop"
+          test ! -e "$HOME/Desktop/ServiceNowDeveloperPanel.desktop"
+
+      - name: Package
+        run: |
+          tar -czf ServiceNowDeveloperPanelSetup-linux-x86_64.tar.gz \
+            -C dist ServiceNowDeveloperPanelSetup
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ServiceNowDeveloperPanelSetup-linux-x86_64.tar.gz
+          archive: false
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SHORTCUT_NAME: ServiceNow Developer Panel.lnk
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Create the virtual environment
+        shell: bash
+        run: |
+          python -m venv virtual_environment
+          virtual_environment/Scripts/python.exe -m pip install -r requirements.txt
+
+      - name: Build
+        shell: bash
+        run: ./build_windows.sh
+
+      - name: Install with the setup
+        run: |
+          $setup = Start-Process -FilePath dist\ServiceNowDeveloperPanelSetup.exe `
+            -ArgumentList '--silent', '--desktop' -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "The setup failed with exit code $($setup.ExitCode)" }
+          "INSTALL_DIR=$env:LOCALAPPDATA\Programs\ServiceNowDeveloperPanel" >> $env:GITHUB_ENV
+
+      - name: Check the installation
+        run: |
+          $menu = Join-Path ([Environment]::GetFolderPath('Programs')) $env:SHORTCUT_NAME
+          $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) $env:SHORTCUT_NAME
+          $paths = @(
+            "$env:INSTALL_DIR\ServiceNowDeveloperPanel.exe",
+            "$env:INSTALL_DIR\ServiceNowDeveloperPanelMcp.exe",
+            "$env:INSTALL_DIR\mcp.json",
+            "$env:INSTALL_DIR\data",
+            $menu,
+            $desktop
+          )
+          foreach ($path in $paths) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path" }
+          }
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($link in @($menu, $desktop)) {
+            $target = $shell.CreateShortcut($link).TargetPath
+            if ($target -ne "$env:INSTALL_DIR\ServiceNowDeveloperPanel.exe") {
+              throw "$link points to $target"
+            }
+          }
+
+      - name: Start the application
+        run: |
+          $app = Start-Process -FilePath "$env:INSTALL_DIR\ServiceNowDeveloperPanel.exe" -PassThru
+          Start-Sleep -Seconds 15
+          if ($app.HasExited) { throw "The application exited with code $($app.ExitCode)" }
+          Stop-Process -Id $app.Id -Force
+          $app.WaitForExit()
+
+      - name: Test the MCP server
+        timeout-minutes: 2
+        run: python .github/scripts/mcp_smoke_test.py "$env:INSTALL_DIR\ServiceNowDeveloperPanelMcp.exe"
+
+      - name: Uninstall with the setup
+        run: |
+          $setup = Start-Process -FilePath dist\ServiceNowDeveloperPanelSetup.exe `
+            -ArgumentList '--silent', '--uninstall', '--remove-data' -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "The setup failed with exit code $($setup.ExitCode)" }
+          $leftovers = @(
+            $env:INSTALL_DIR,
+            (Join-Path ([Environment]::GetFolderPath('Programs')) $env:SHORTCUT_NAME),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) $env:SHORTCUT_NAME)
+          )
+          foreach ($path in $leftovers) {
+            if (Test-Path -LiteralPath $path) { throw "$path was not removed" }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/ServiceNowDeveloperPanelSetup.exe
+          archive: false
+          if-no-files-found: error
