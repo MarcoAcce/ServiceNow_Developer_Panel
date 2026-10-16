@@ -4,31 +4,31 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
-from app_paths import icon_path
-from icons import refresh_icon_widgets
-from sidebar import Sidebar
-from tab import Tab
-from config_repository import ConfigRepository
-from config_tab import ConfigTab
-from database_manager import DatabaseError, DatabaseManager
-from home_tab import HomeTab
+from core.app_paths import icon_path
+from ui.icons import refresh_icon_widgets
+from ui.sidebar import Sidebar
+from ui.tab import Tab
+from configuration.config_repository import ConfigRepository
+from configuration.config_tab import ConfigTab
+from core.database_manager import DatabaseError, DatabaseManager
+from ui.home_tab import HomeTab
 
-from request_types import RequestType
-from request_hints import RequestHintRepository
-from request_tab import RequestTab
-from request_tabs import create_request_tab
+from core.request_types import RequestType
+from storage.request_hints import RequestHintRepository
+from request_tabs.request_tab import RequestTab
+from request_tabs.table_request_tabs import create_request_tab
 
-from response_context import ResponseContext
-from response_repository import ResponseRepository
-from response_tab import ResponseTab
+from response_tabs.response_context import ResponseContext
+from storage.response_repository import ResponseRepository
+from response_tabs.response_tab import ResponseTab
 
-from service import RequestCall, RequestError, RequestResult, RequestService
-from cached_service import CachedRequestService
-from dummy_service import DummyRequestService
-from http_service import HttpRequestService
+from services.service import RequestCall, RequestError, RequestResult, RequestService
+from services.cached_service import CachedRequestService
+from services.dummy_service import DummyRequestService
+from services.http_service import HttpRequestService
 
-from theme import Theme, apply_theme, theme_of_key
-from window_frame import FramelessWindow
+from ui.theme import Theme, apply_theme, theme_of_key
+from ui.window_frame import FramelessWindow
 
 APPLICATION_NAME: str = "ServiceNow Developer Panel"
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
