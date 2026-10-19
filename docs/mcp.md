@@ -6,6 +6,8 @@ It is read-only: every request is a GET call on the Table API.
 The core feature is SQL queries on cached data: agents can fetch tables from the instance to cache them locally and query using plain SQL. 
 This lets them study the instance as deeply as they need, with joins and group by that the Table API does not support.
 
+![Example of mcp query](images/mcp_example.png)
+
 ## Tools
 
 | Tool | Purpose |
