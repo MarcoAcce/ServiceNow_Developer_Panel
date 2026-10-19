@@ -6,13 +6,16 @@
 This project is meant as a helper tool for service now developer.
 It provides a simple, desktop native UI to make Rest API call to a ServiceNow instance and to browse and query the result.
 
-For example, you may extract all client scripts targeting a table, check the ACLs for a field, or you simply select all records in a table.
+![Home tab](docs/images/home.png)
+
+From standard Table API operations, such as selecting filtered records in a table, you will be able to perform advanced operations, like join operations between tables and grouping.
+
+![Query on local cache](docs/images/multiple_tables_query.png)
 
 The same APIs used for the user interface also powers a local MCP server, so your AI model of choice can browse and study your ServiceNow instance.
 
 This tool provides read-only methods, although PUT calls may be added in the future.
 
-![Home tab](docs/images/home.png)
 
 # Warning notice
 
