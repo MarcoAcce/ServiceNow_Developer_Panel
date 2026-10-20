@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import Shiboken
 
 from core.request_model import RequestResult
 from core.table_description import (
@@ -264,4 +265,6 @@ class TableDescriptionResponseTab(RecordsResponseTab):
                 self.choices_widget.setItem(row, column, QTableWidgetItem(text))
 
     def _show_relations(self) -> None:
-        RelationsDialog(self.result, self).exec()
+        dialog = RelationsDialog(self.result, self)
+        dialog.exec()
+        Shiboken.delete(dialog)

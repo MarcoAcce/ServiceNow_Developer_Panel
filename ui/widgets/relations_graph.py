@@ -7,7 +7,6 @@ from PySide6.QtGui import (
     QFontMetrics,
     QHelpEvent,
     QPainter,
-    QPainterPath,
     QPen,
     QPolygonF,
 )
@@ -36,7 +35,8 @@ TRIANGLE_LENGTH: int = 10
 TRIANGLE_WIDTH: int = 6
 CARDINALITY_OFFSET: int = 12
 CARDINALITY_SIZE: int = 16
-CURVE_FACTOR: float = 0.5
+TRUNK_START: int = 44
+TRUNK_SPACING: int = 30
 ONE: str = "1"
 MANY: str = "N"
 TEXT_SEPARATOR: str = " · "
@@ -108,6 +108,20 @@ def edge_pen(kind: RelationKind, theme: Theme) -> QPen:
     if kind in HIERARCHY_KINDS:
         return QPen(color_of(theme.text_disabled), LINE_WIDTH)
     return QPen(color_of(theme.accent), LINE_WIDTH)
+
+
+def kind_groups(
+    nodes: Sequence[GraphNode],
+) -> list[tuple[RelationKind, list[GraphNode]]]:
+    groups: list[tuple[RelationKind, list[GraphNode]]] = []
+    for node in nodes:
+        if node.relation is None:
+            continue
+        if groups and groups[-1][0] is node.relation.kind:
+            groups[-1][1].append(node)
+        else:
+            groups.append((node.relation.kind, [node]))
+    return groups
 
 
 def node_height(font: QFont) -> int:
@@ -292,24 +306,29 @@ class RelationsGraph(QWidget):
     ) -> None:
         theme = current_theme()
         center = self._layout.center.rect
-        start_x = center.left() if left_side else center.right()
-        step = center.height() / (len(nodes) + 1)
-        for index, node in enumerate(nodes):
-            relation = node.relation
-            if relation is None:
-                continue
-            start = QPointF(start_x, center.top() + step * (index + 1))
-            end_x = node.rect.right() if left_side else node.rect.left()
-            end = QPointF(end_x, node.rect.center().y())
-            reach = (end.x() - start.x()) * CURVE_FACTOR
-            path = QPainterPath(start)
-            path.cubicTo(
-                QPointF(start.x() + reach, start.y()), QPointF(end.x() - reach, end.y()), end
+        groups = kind_groups(nodes)
+        center_x = center.left() if left_side else center.right()
+        step = center.height() / (len(groups) + 1)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for index, (kind, members) in enumerate(groups):
+            edge_x = members[0].rect.right() if left_side else members[0].rect.left()
+            offset = TRUNK_START + index * TRUNK_SPACING
+            trunk_x = edge_x + offset if left_side else edge_x - offset
+            joint_y = center.top() + step * (index + 1)
+            middles = [member.rect.center().y() for member in members]
+            painter.setPen(edge_pen(kind, theme))
+            painter.drawLine(
+                QPointF(trunk_x, min(middles + [joint_y])),
+                QPointF(trunk_x, max(middles + [joint_y])),
             )
-            painter.setPen(edge_pen(relation.kind, theme))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-            self._paint_cardinality(painter, relation, end, left_side)
+            painter.drawLine(QPointF(trunk_x, joint_y), QPointF(center_x, joint_y))
+            for member, middle in zip(members, middles):
+                painter.setPen(edge_pen(kind, theme))
+                painter.drawLine(QPointF(edge_x, middle), QPointF(trunk_x, middle))
+                if member.relation is not None:
+                    self._paint_cardinality(
+                        painter, member.relation, QPointF(edge_x, middle), left_side
+                    )
 
     def _paint_cardinality(
         self, painter: QPainter, relation: Relation, end: QPointF, left_side: bool
