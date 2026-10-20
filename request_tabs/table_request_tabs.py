@@ -129,6 +129,7 @@ class DictionaryRequestTab(TableRequestTab):
 class AclRequestTab(TableRequestTab):
 
     fields_option: bool = False
+    collapsed_sections: bool = True
 
     def __init__(
         self,

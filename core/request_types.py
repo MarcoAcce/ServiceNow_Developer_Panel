@@ -8,10 +8,15 @@ class RequestType:
     group: str
     table: str
     description: str
+    home_label: str = ""
+
+    @property
+    def button_label(self) -> str:
+        return self.home_label or self.label
 
 
+GROUP_FEATURED: str = "Featured"
 GROUP_TABLES: str = "Tables"
-GROUP_SECURITY: str = "Security"
 GROUP_SCRIPTS: str = "Scripts"
 GROUP_UI: str = "UI elements"
 
@@ -25,11 +30,12 @@ TABLE_RECORDS: RequestType = RequestType(
 MULTIPLE_TABLES: RequestType = RequestType(
     key="multiple_tables",
     label="Multiple tables",
-    group=GROUP_TABLES,
+    group=GROUP_FEATURED,
     table="",
     description=(
         "Request several tables one after the other, then query the cached result with sql."
     ),
+    home_label="Multiple tables - queriable",
 )
 TABLE_DICTIONARY: RequestType = RequestType(
     key="table_dictionary",
@@ -41,14 +47,14 @@ TABLE_DICTIONARY: RequestType = RequestType(
 ACL_LIST: RequestType = RequestType(
     key="acl_list",
     label="ACL list",
-    group=GROUP_SECURITY,
+    group=GROUP_FEATURED,
     table="sys_security_acl",
     description="Inspect the access controls of a table or a single field.",
 )
 VERIFY_SECURITY: RequestType = RequestType(
     key="verify_security",
     label="Verify security",
-    group=GROUP_SECURITY,
+    group=GROUP_FEATURED,
     table="sys_security_acl",
     description=(
         "Check which users, by their roles, can run an operation on a table or a field."
@@ -111,9 +117,8 @@ REQUEST_TYPES: tuple[RequestType, ...] = (
     UI_ACTION_LIST,
 )
 
-GROUP_ORDER: tuple[str, ...] = (
+TABLE_API_GROUPS: tuple[str, ...] = (
     GROUP_TABLES,
-    GROUP_SECURITY,
     GROUP_SCRIPTS,
     GROUP_UI,
 )

@@ -31,6 +31,7 @@ class Role(StrEnum):
     CARD = "card"
     ROW = "row"
     PRIMARY = "primary"
+    FEATURED = "featured"
     DANGER = "danger"
     MONOSPACE = "monospace"
     ICON_BUTTON = "icon_button"
@@ -42,6 +43,7 @@ class Role(StrEnum):
 BORDER_RADIUS: int = 4
 CARD_RADIUS: int = 6
 CONTROL_HEIGHT: int = 28
+FEATURED_HEIGHT: int = 48
 SCROLLBAR_WIDTH: int = 10
 ITEM_PADDING_VERTICAL: int = 10
 ITEM_PADDING_HORIZONTAL: int = 12
@@ -400,6 +402,14 @@ QPushButton[{ROLE_PROPERTY}="{Role.PRIMARY}"]:disabled {{
     background-color: {rgb(theme.canvas)};
     color: {rgb(theme.text_disabled)};
     border-color: {rgb(theme.divider)};
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.FEATURED}"] {{
+    background-color: {rgb(theme.accent_subtle)};
+    border-color: {rgb(theme.accent)};
+    min-height: {FEATURED_HEIGHT}px;
+}}
+QPushButton[{ROLE_PROPERTY}="{Role.FEATURED}"]:hover {{
+    border-color: {rgb(theme.accent_hover)};
 }}
 QPushButton[{ROLE_PROPERTY}="{Role.DANGER}"] {{
     color: {rgb(theme.danger)};

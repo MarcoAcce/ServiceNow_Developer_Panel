@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from configuration.config_repository import ConfigRepository
 from ui.dialogs import show_error
+from ui.widgets.collapsible_section import CollapsibleSection
 from ui.widgets.filter_fields import BooleanFilterField, DateFilterField, RadioChoiceField
 from ui.widgets.instance_selector import InstanceSelector
 from ui.widgets.query_builder import (
@@ -80,6 +81,8 @@ EXECUTE_LABEL: str = "Execute"
 TARGET_HINT: str = "The target table is required: the request cannot be sent without it."
 TARGET_LABEL: str = "Target table"
 TARGET_SPACING: int = 8
+QUERY_SECTION: str = "Encoded query"
+OPTIONS_SECTION: str = "Query options"
 
 
 @dataclass(frozen=True)
@@ -258,6 +261,7 @@ class RequestTab(Tab):
 class TableRequestTab(RequestTab):
 
     fields_option: bool = True
+    collapsed_sections: bool = False
 
     def __init__(
         self,
@@ -452,12 +456,8 @@ class TableRequestTab(RequestTab):
         layout.addWidget(section_label("Filters"))
         layout.addWidget(self._build_filters())
 
-        layout.addWidget(section_label("Encoded query"))
-        layout.addWidget(hint_label(QUERY_HINT))
-        layout.addWidget(self.query_builder)
-
-        layout.addWidget(section_label("Query options"))
-        layout.addWidget(self._build_options())
+        self._add_section(layout, QUERY_SECTION, self._build_query())
+        self._add_section(layout, OPTIONS_SECTION, self._build_options())
 
         layout.addWidget(vertical_spacer())
 
@@ -511,6 +511,21 @@ class TableRequestTab(RequestTab):
         self._filter_layout.setContentsMargins(0, 0, 0, 0)
         self.build_filters(self._filter_layout)
         return filters
+
+    def _add_section(self, layout: QVBoxLayout, title: str, body: QWidget) -> None:
+        if self.collapsed_sections:
+            layout.addWidget(CollapsibleSection(title, body))
+            return
+        layout.addWidget(section_label(title))
+        layout.addWidget(body)
+
+    def _build_query(self) -> QWidget:
+        query = QWidget()
+        layout = QVBoxLayout(query)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(hint_label(QUERY_HINT))
+        layout.addWidget(self.query_builder)
+        return query
 
     def _build_options(self) -> QWidget:
         options = QWidget()
