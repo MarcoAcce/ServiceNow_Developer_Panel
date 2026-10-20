@@ -14,8 +14,6 @@ The request is sent to the working instance, shown at the bottom of the page.
 When a response arrives a new tab opens, showing the request details and the records. 
 You can filter the rows, order by column, and even save the records as CSV.
 
-![Table records response](images/example_request.png)
-
 The *sidebar* allows you to move between *Home*, *response* tabs and *Configuration*. 
 
 The response tabs are ordered by date and labeled with the target table. 
@@ -48,6 +46,10 @@ In this context a User signifies a set of roles, checked together against the AC
 The response page shows the decision for each user, the controls evaluated and the conditions and scripts still to satisfy. 
 
 ![Verify security response](images/verify_security_response.png)
+
+### Describe table - Dictionary
+
+*Describe table* pulls a from the dictionary the list of all fields of a table, including those inherited from other tables, and offers a simple interactive UI to see each field's details. 
 
 # Links
 
