@@ -286,6 +286,9 @@ class RecordsResponseTab(ResponseTab):
     def build_details(self, layout: QVBoxLayout) -> None:
         return None
 
+    def build_toolbar(self, toolbar: QHBoxLayout) -> None:
+        return None
+
     def on_row_selected(self, record: dict[str, str]) -> None:
         return None
 
@@ -328,6 +331,7 @@ class RecordsResponseTab(ResponseTab):
         save_button.clicked.connect(self._save_as_csv)
         toolbar.addWidget(section_label("Result"))
         toolbar.addWidget(self.filter_field, 1)
+        self.build_toolbar(toolbar)
         toolbar.addWidget(save_button)
         return toolbar
 

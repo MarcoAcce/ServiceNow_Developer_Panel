@@ -60,6 +60,16 @@ VERIFY_SECURITY: RequestType = RequestType(
         "Check which users, by their roles, can run an operation on a table or a field."
     ),
 )
+TABLE_DESCRIPTION: RequestType = RequestType(
+    key="table_description",
+    label="Describe table",
+    group=GROUP_FEATURED,
+    table="sys_dictionary",
+    description=(
+        "List every field of a table, inherited ones included, and draw its relations."
+    ),
+    home_label="Describe table - dictionary",
+)
 CLIENT_SCRIPT_LIST: RequestType = RequestType(
     key="client_script_list",
     label="Client scripts",
@@ -109,6 +119,7 @@ REQUEST_TYPES: tuple[RequestType, ...] = (
     TABLE_DICTIONARY,
     ACL_LIST,
     VERIFY_SECURITY,
+    TABLE_DESCRIPTION,
     CLIENT_SCRIPT_LIST,
     BUSINESS_RULE_LIST,
     SCRIPT_INCLUDE_LIST,

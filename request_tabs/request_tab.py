@@ -155,6 +155,9 @@ class RequestTab(Tab):
     def build_request(self) -> RequestSpec:
         raise NotImplementedError
 
+    def send_request(self) -> RequestCall:
+        return self._service.send(self.build_request())
+
     def create_response_tab(self, result: RequestResult) -> ResponseTab:
         return RecordsResponseTab(result)
 
@@ -190,7 +193,7 @@ class RequestTab(Tab):
             return
         self.execute_button.setEnabled(False)
         show_status(self.status_label, RUNNING_MESSAGE)
-        self._call = self._service.send(self.build_request())
+        self._call = self.send_request()
         self._call.succeeded.connect(self._on_succeeded)
         self._call.failed.connect(self._on_failed)
         self.runningChanged.emit(True)
