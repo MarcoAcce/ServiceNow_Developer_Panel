@@ -71,6 +71,8 @@ class TableQueryForm(QWidget):
         self.limit_field: QSpinBox = QSpinBox()
         self.query_builder: QueryBuilder = QueryBuilder()
         self.options: list[QWidget] = []
+        self._details: list[QWidget] = []
+        self._form: QFormLayout = QFormLayout()
         self._build_ui()
         self._apply_state()
 
@@ -90,6 +92,12 @@ class TableQueryForm(QWidget):
 
     def focus_table(self) -> None:
         self.table_field.setFocus()
+
+    def set_details_visible(self, visible: bool) -> None:
+        for widget in (self.fields_field, self.order_field, self.limit_field):
+            self._form.setRowVisible(widget, visible)
+        for widget in self._details:
+            widget.setVisible(visible)
 
     def _field_names(self) -> list[str]:
         return list(self._fields(self.table_name()))
@@ -121,7 +129,7 @@ class TableQueryForm(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(FORM_SPACING)
-        form = QFormLayout()
+        form = self._form
         form.setContentsMargins(0, 0, 0, 0)
         form.addRow(TABLE_LABEL, self.table_field)
         self._add_option(form, FIELDS_LABEL, self.fields_field)
@@ -131,6 +139,7 @@ class TableQueryForm(QWidget):
         for widget in (hint_label(LIMIT_HINT), section_label(QUERY_SECTION),
                        hint_label(QUERY_HINT), self.query_builder):
             self.options.append(widget)
+            self._details.append(widget)
             layout.addWidget(widget)
         self.table_field.textChanged.connect(self._on_table_changed)
         self.query_builder.changed.connect(self.changed)

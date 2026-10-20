@@ -16,17 +16,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.dialogs import show_error
-from ui.icons import REFRESH_ICON, IconButton
+from ui.dialogs import CLOSE_LABEL, FramelessDialog, show_error
+from ui.icons import INFO_ICON, REFRESH_ICON, IconButton
 from core.record_columns import ordered_columns
 from response_tabs.response_context import ResponseContext
 from services.service import RequestResult
 from ui.tab import Tab
+from ui.theme import Role, set_role
 from storage.table_export import write_csv
 from ui.ui_widgets import (
     check_item,
     hint_label,
     horizontal_rule,
+    primary_button,
     section_label,
     shorten_text,
     show_status,
@@ -37,6 +39,9 @@ SUMMARY_TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 MENU_TIME_FORMAT: str = "%H:%M:%S"
 DETAIL_SEPARATOR: str = " · "
 REFRESH_TOOLTIP: str = "Run this request again on the same instance"
+DETAILS_TOOLTIP: str = "Show the request and response details"
+DETAILS_TITLE: str = "{label} details"
+DETAILS_WIDTH: int = 480
 REFRESHING_MESSAGE: str = "Running the request again..."
 REFRESH_ERROR_MESSAGE: str = "Refresh failed: {message}"
 SAVE_ERROR_TITLE: str = "Save failed"
@@ -48,6 +53,7 @@ PREVIOUS_LABEL: str = "Previous"
 NEXT_LABEL: str = "Next"
 PAGE_TEXT: str = "Page {page} of {pages}"
 RANGE_TEXT: str = "{start} to {end} of {count}"
+RECORDS_TEXT: str = "{count} records"
 MATCHING_TEXT: str = "{start} to {end} of {matching} matching, {total} received"
 NO_MATCH_TEXT: str = "0 of {total}"
 PAGER_SPACING: int = 8
@@ -56,6 +62,21 @@ TRUE_VALUE: str = "true"
 
 def received_columns(result: RequestResult) -> tuple[str, ...]:
     return ordered_columns(result.columns, result.records) or result.columns
+
+
+class ResponseDetailsDialog(FramelessDialog):
+
+    def __init__(self, title: str, summary: QWidget, parent: QWidget | None = None) -> None:
+        super().__init__(title, parent)
+        self.setMinimumWidth(DETAILS_WIDTH)
+        for label in summary.findChildren(QLabel):
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.content_layout.addWidget(summary)
+        summary.show()
+        close_button = primary_button(CLOSE_LABEL)
+        close_button.setDefault(True)
+        close_button.clicked.connect(self.accept)
+        self.add_button_row(close_button)
 
 
 class ResponseTab(Tab):
@@ -79,6 +100,7 @@ class ResponseTab(Tab):
         self.status_value_label: QLabel = QLabel()
         self.received_label: QLabel = QLabel()
         self.refresh_button: IconButton = IconButton(REFRESH_ICON, REFRESH_TOOLTIP)
+        self.details_button: IconButton = IconButton(INFO_ICON, DETAILS_TOOLTIP)
         self._build_ui()
         self.refresh_summary()
         self.fill_content()
@@ -172,6 +194,15 @@ class ResponseTab(Tab):
     def is_refreshing(self) -> bool:
         return self._refreshing
 
+    def show_details(self) -> None:
+        dialog = ResponseDetailsDialog(
+            DETAILS_TITLE.format(label=self.result.request_type.label), self._summary, self
+        )
+        dialog.exec()
+        self._summary.setParent(self)
+        self._summary.hide()
+        dialog.deleteLater()
+
     def refresh_summary(self) -> None:
         target = self.result.target
         address = target.address
@@ -193,12 +224,13 @@ class ResponseTab(Tab):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.addLayout(self._build_header())
-        root.addWidget(self._build_summary())
+        self._summary: QWidget = self._build_summary()
         root.addWidget(horizontal_rule())
         self.build_body(root)
 
     def _build_summary(self) -> QWidget:
-        summary = QWidget()
+        summary = QWidget(self)
+        summary.hide()
         layout = QFormLayout(summary)
         layout.setContentsMargins(0, 0, 0, 0)
         self.build_summary_rows(layout)
@@ -211,7 +243,10 @@ class ResponseTab(Tab):
         self.refresh_button.clicked.connect(lambda: self.refreshRequested.emit(self))
         header.addWidget(self.status_label)
         header.addWidget(self.refresh_button)
+        self.details_button.clicked.connect(self.show_details)
+        header.addWidget(self.details_button)
         return header
+
 
 class RecordsResponseTab(ResponseTab):
 
@@ -258,7 +293,6 @@ class RecordsResponseTab(ResponseTab):
         super().build_summary_rows(layout)
         layout.addRow("Endpoint", self.endpoint_label)
         layout.addRow("Parameters", self.parameters_label)
-        layout.addRow("Records", self.record_count_label)
 
     def refresh_summary(self) -> None:
         super().refresh_summary()
@@ -301,6 +335,8 @@ class RecordsResponseTab(ResponseTab):
         layout = QHBoxLayout(self.pager)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(PAGER_SPACING)
+        set_role(self.record_count_label, Role.HINT)
+        layout.addWidget(self.record_count_label)
         self.previous_button.clicked.connect(self._on_previous_page)
         self.next_button.clicked.connect(self._on_next_page)
         layout.addStretch(1)
@@ -377,7 +413,10 @@ class RecordsResponseTab(ResponseTab):
 
     def _update_pager(self) -> None:
         pages = self._page_count()
-        self.pager.setVisible(len(self._filtered) > PAGE_SIZE)
+        paged = len(self._filtered) > PAGE_SIZE
+        self.previous_button.setVisible(paged)
+        self.page_label.setVisible(paged)
+        self.next_button.setVisible(paged)
         self.page_label.setText(PAGE_TEXT.format(page=self._page + 1, pages=pages))
         self.previous_button.setEnabled(self._page > 0)
         self.next_button.setEnabled(self._page + 1 < pages)
@@ -399,7 +438,7 @@ class RecordsResponseTab(ResponseTab):
         if matching != total:
             text = MATCHING_TEXT.format(start=start, end=end, matching=matching, total=total)
         elif matching <= PAGE_SIZE:
-            text = str(total)
+            text = RECORDS_TEXT.format(count=total)
         else:
             text = RANGE_TEXT.format(start=start, end=end, count=total)
         self.record_count_label.setText(text)

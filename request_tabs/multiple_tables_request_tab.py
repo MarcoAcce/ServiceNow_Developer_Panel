@@ -1,4 +1,4 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
@@ -19,12 +19,7 @@ from core.request_types import MULTIPLE_TABLES
 from response_tabs.response_tab import ResponseTab
 from services.service import RequestPart, RequestResult, RequestService, RequestSpec
 from ui.widgets.table_query_form import TableQueryForm
-from ui.ui_widgets import (
-    as_row,
-    hint_label,
-    section_label,
-    vertical_spacer,
-)
+from ui.ui_widgets import as_row, hint_label, section_label, vertical_spacer
 
 TABLES_SECTION: str = "Tables"
 TABLES_HINT: str = (
@@ -33,7 +28,6 @@ TABLES_HINT: str = (
 ADD_TABLE_LABEL: str = "Add table"
 ADD_TABLE_TOOLTIP: str = "Add another table to the request"
 ADD_TABLE_DISABLED_TOOLTIP: str = "Name the table you just added before adding another one"
-NEW_TABLE_TITLE: str = "New table"
 EXPAND_TOOLTIP: str = "Show the query of this table"
 COLLAPSE_TOOLTIP: str = "Hide the query of this table"
 REMOVE_TOOLTIP: str = "Remove this table from the request"
@@ -51,11 +45,11 @@ class TableRequestRow(QFrame):
     def __init__(self, form: TableQueryForm) -> None:
         super().__init__()
         self.form: TableQueryForm = form
-        self.title_label = section_label(NEW_TABLE_TITLE)
-        self.expand_button: IconButton = IconButton(COLLAPSE_ICON, COLLAPSE_TOOLTIP)
+        self.expand_button: IconButton = IconButton(EXPAND_ICON, EXPAND_TOOLTIP)
         self.remove_button: IconButton = IconButton(DELETE_ICON, REMOVE_TOOLTIP, Tone.DANGER)
-        self._expanded: bool = True
+        self._expanded: bool = False
         self._build_ui()
+        self.set_expanded(False)
 
     def table_name(self) -> str:
         return self.form.table_name()
@@ -74,7 +68,7 @@ class TableRequestRow(QFrame):
 
     def set_expanded(self, expanded: bool) -> None:
         self._expanded = expanded
-        self.form.setVisible(expanded)
+        self.form.set_details_visible(expanded)
         self.expand_button.set_name(COLLAPSE_ICON if expanded else EXPAND_ICON)
         self.expand_button.setToolTip(COLLAPSE_TOOLTIP if expanded else EXPAND_TOOLTIP)
 
@@ -88,33 +82,21 @@ class TableRequestRow(QFrame):
 
     def _build_ui(self) -> None:
         as_row(self)
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(ROW_MARGIN, ROW_MARGIN, ROW_MARGIN, ROW_MARGIN)
-        layout.setSpacing(ROW_SPACING)
-        layout.addLayout(self._build_header())
-        layout.addWidget(self.form)
-        self.form.changed.connect(self._on_form_changed)
+        layout.setSpacing(HEADER_SPACING)
+        layout.addWidget(self.expand_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.form, 1)
+        layout.addWidget(self.remove_button, 0, Qt.AlignmentFlag.AlignTop)
+        self.form.changed.connect(self.changed)
         self.expand_button.clicked.connect(self._on_expand_clicked)
         self.remove_button.clicked.connect(lambda: self.removeRequested.emit(self))
-
-    def _build_header(self) -> QHBoxLayout:
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(HEADER_SPACING)
-        header.addWidget(self.expand_button)
-        header.addWidget(self.title_label, 1)
-        header.addWidget(self.remove_button)
-        return header
 
     def _on_expand_clicked(self) -> None:
         if self._expanded:
             self.set_expanded(False)
             return
         self.expandRequested.emit(self)
-
-    def _on_form_changed(self) -> None:
-        self.title_label.setText(self.table_name() or NEW_TABLE_TITLE)
-        self.changed.emit()
 
 
 class MultipleTablesRequestTab(RequestTab):
@@ -199,7 +181,6 @@ class MultipleTablesRequestTab(RequestTab):
         row.removeRequested.connect(self._on_remove_requested)
         self._rows.append(row)
         self._rows_layout.addWidget(row)
-        self._expand(row)
         self.refresh_state()
         row.focus_table()
 
