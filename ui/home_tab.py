@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from configuration.config_repository import ConfigRepository
 from ui.widgets.instance_selector import InstanceSelector
+from ui.widgets.wrapping_grid import WrappingGrid
 from core.request_types import (
     GROUP_FEATURED,
     TABLE_API_GROUPS,
@@ -23,6 +24,7 @@ from ui.ui_widgets import hint_label, horizontal_rule, section_label, title_labe
 BUTTONS_PER_ROW: int = 3
 BUTTON_MINIMUM_HEIGHT: int = 48
 FEATURED_TITLE_DELTA: int = 2
+FEATURED_ITEM_WIDTH: int = 280
 TABLE_API_TITLE: str = "Table APIs"
 HOME_HINT: str = "Pick a request type: a new request tab opens where you can set the target table and the filters."
 INSTANCE_SECTION: str = "Working instance"
@@ -71,10 +73,8 @@ class HomeTab(Tab):
         main_layout.addWidget(self.instance_selector)
 
     def _build_featured(self) -> QWidget:
-        featured = QWidget()
-        layout = QGridLayout(featured)
-        layout.setContentsMargins(0, 0, 0, 0)
-        for index, request_type in enumerate(request_types_of_group(GROUP_FEATURED)):
+        featured = WrappingGrid(FEATURED_ITEM_WIDTH)
+        for request_type in request_types_of_group(GROUP_FEATURED):
             button = self._build_button(request_type)
             set_role(button, Role.FEATURED)
             font = button.font()
@@ -83,8 +83,13 @@ class HomeTab(Tab):
             button.setFont(font)
             description = hint_label(request_type.description)
             description.setAlignment(Qt.AlignmentFlag.AlignTop)
-            layout.addWidget(button, 0, index)
-            layout.addWidget(description, 1, index)
+            item = QWidget()
+            layout = QVBoxLayout(item)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(button)
+            layout.addWidget(description)
+            layout.addStretch(1)
+            featured.add_widget(item)
         return featured
 
     def _build_group(self, group: str) -> QGroupBox:

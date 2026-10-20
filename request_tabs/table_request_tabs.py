@@ -13,6 +13,7 @@ from ui.widgets.filter_fields import RadioChoiceField
 from storage.request_hints import RequestHintRepository
 from ui.widgets.query_builder import OPERATOR_CONTAINS, OPERATOR_IS, build_condition
 from request_tabs.multiple_tables_request_tab import MultipleTablesRequestTab
+from request_tabs.table_description_request_tab import TableDescriptionRequestTab
 from request_tabs.request_tab import RequestTab, TableRequestTab, required_label, required_message
 from ui.widgets.suggestion_field import SuggestionField
 from ui.widgets.table_query_form import TABLE_PLACEHOLDER
@@ -23,6 +24,7 @@ from core.request_types import (
     DATA_POLICY_LIST,
     MULTIPLE_TABLES,
     SCRIPT_INCLUDE_LIST,
+    TABLE_DESCRIPTION,
     TABLE_DICTIONARY,
     TABLE_RECORDS,
     UI_ACTION_LIST,
@@ -364,6 +366,7 @@ REQUEST_TAB_CLASSES: dict[str, type[RequestTab]] = {
     TABLE_DICTIONARY.key: DictionaryRequestTab,
     ACL_LIST.key: AclRequestTab,
     VERIFY_SECURITY.key: VerifySecurityRequestTab,
+    TABLE_DESCRIPTION.key: TableDescriptionRequestTab,
     CLIENT_SCRIPT_LIST.key: ClientScriptRequestTab,
     BUSINESS_RULE_LIST.key: BusinessRuleRequestTab,
     SCRIPT_INCLUDE_LIST.key: ScriptIncludeRequestTab,
