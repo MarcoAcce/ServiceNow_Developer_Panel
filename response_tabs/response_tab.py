@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import Shiboken
 
 from ui.dialogs import CLOSE_LABEL, FramelessDialog, show_error
 from ui.icons import INFO_ICON, REFRESH_ICON, IconButton
@@ -201,7 +202,7 @@ class ResponseTab(Tab):
         dialog.exec()
         self._summary.setParent(self)
         self._summary.hide()
-        dialog.deleteLater()
+        Shiboken.delete(dialog)
 
     def refresh_summary(self) -> None:
         target = self.result.target

@@ -11,7 +11,8 @@ The request is sent to the working instance, shown at the bottom of the page.
 
 ## Responses
 
-When a response arrives a new tab opens, showing the request details and the records. 
+When a response arrives a new tab opens, showing the records. 
+The *(i)* button in the top right corner shows the request details, such as the instance, the status and the parameters sent. 
 You can filter the rows, order by column, and even save the records as CSV.
 
 The *sidebar* allows you to move between *Home*, *response* tabs and *Configuration*. 
@@ -50,6 +51,12 @@ The response page shows the decision for each user, the controls evaluated and t
 ### Describe table - Dictionary
 
 *Describe table* pulls a from the dictionary the list of all fields of a table, including those inherited from other tables, and offers a simple interactive UI to see each field's details. 
+
+![Describe table response](images/describe_table_response.png)
+
+The *Show relations* button opens a graph of the relations of the table. 
+
+![Relations graph](images/describe_table_relations.png)
 
 # Links
 
