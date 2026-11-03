@@ -1,10 +1,30 @@
+import os
 import sqlite3
+import sys
+import time
+from functools import partial
 
-from PySide6.QtCore import QThreadPool
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QLockFile, QObject, Qt, QThreadPool, QTimer
+from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
 from core.app_paths import APPLICATION_DIRECTORY_NAME, icon_path
+from core.core_channel import (
+    HEADLESS_ARGUMENT,
+    RETRY_INTERVAL_SECONDS,
+    STARTUP_TIMEOUT_SECONDS,
+    UNAVAILABLE_MESSAGE,
+    WINDOW_CLIENT,
+    CoreRejected,
+    CoreUnavailable,
+    connect,
+    lock_path,
+)
+from services.core_server import CoreServer
+from services.mcp_session import McpSession
+from services.mcp_tools import build_server
+from services.mcp_transport import serve_connection
+from ui.dialogs import ErrorDialog
 from ui.icons import refresh_icon_widgets
 from ui.sidebar import Sidebar
 from ui.tab import Tab
@@ -35,7 +55,12 @@ WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
 WINDOW_HEIGHT: int = 820
 TASK_SHUTDOWN_TIMEOUT_MS: int = 15000
+IDLE_GRACE_PERIOD_MS: int = 30000
 USE_DUMMY_SERVICE: bool = False
+STARTUP_ERROR_TITLE: str = "ServiceNow Developer Panel not started"
+PLATFORM_VARIABLE: str = "QT_QPA_PLATFORM"
+DISPLAY_VARIABLES: tuple[str, ...] = ("DISPLAY", "WAYLAND_DISPLAY")
+OFFSCREEN_PLATFORM: str = "offscreen"
 
 
 def instance_service(parent: QWidget) -> RequestService:
@@ -145,6 +170,13 @@ class MainWindow(FramelessWindow):
         if self._current_page is None:
             self._display_sidebar_page()
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._discard_request_page()
+        self._cancel_refresh()
+        for page in self.response_tabs:
+            page.cancel()
+        super().closeEvent(event)
+
     def _on_theme_changed(self, key: str) -> None:
         theme = theme_of_key(key)
         application = QApplication.instance()
@@ -224,6 +256,61 @@ class MainWindow(FramelessWindow):
         request_page.deleteLater()
 
 
+class PanelCore(QObject):
+
+    def __init__(
+        self,
+        repository: ConfigRepository,
+        database: DatabaseManager,
+        server: CoreServer,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._repository: ConfigRepository = repository
+        self._database: DatabaseManager = database
+        self._server: CoreServer = server
+        self._window: MainWindow | None = None
+        self._idle_timer: QTimer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.setInterval(IDLE_GRACE_PERIOD_MS)
+        self._idle_timer.timeout.connect(self._quit_if_idle)
+        server.windowRequested.connect(self.show_window)
+        server.clientsChanged.connect(self.check_idle)
+
+    def show_window(self) -> None:
+        window = self._window
+        if window is None:
+            theme = theme_of_key(self._repository.theme_key())
+            window = MainWindow(self._repository, self._database, theme)
+            window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            window.destroyed.connect(self._on_window_destroyed)
+            self._window = window
+        self._idle_timer.stop()
+        if window.isMinimized():
+            window.showNormal()
+        else:
+            window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def check_idle(self) -> None:
+        if self._is_idle():
+            self._idle_timer.start()
+        else:
+            self._idle_timer.stop()
+
+    def _is_idle(self) -> bool:
+        return self._window is None and self._server.client_count == 0
+
+    def _on_window_destroyed(self) -> None:
+        self._window = None
+        self.check_idle()
+
+    def _quit_if_idle(self) -> None:
+        if self._is_idle():
+            QApplication.quit()
+
+
 def purge_expired_cache(database: DatabaseManager) -> None:
     try:
         database.purge_expired_responses()
@@ -232,24 +319,86 @@ def purge_expired_cache(database: DatabaseManager) -> None:
         return
 
 
-def main() -> None:
+def acquire_core_lock(headless: bool) -> QLockFile | None:
+    lock = QLockFile(str(lock_path()))
+    lock.setStaleLockTime(0)
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while True:
+        if lock.tryLock(0):
+            return lock
+        if headless:
+            return None
+        try:
+            connect(WINDOW_CLIENT).close()
+            return None
+        except CoreRejected as error:
+            report_startup_error(str(error))
+            return None
+        except CoreUnavailable:
+            if time.monotonic() > deadline:
+                report_startup_error(UNAVAILABLE_MESSAGE)
+                return None
+        time.sleep(RETRY_INTERVAL_SECONDS)
+
+
+def report_startup_error(message: str) -> None:
+    application = QApplication.instance() or QApplication([])
+    if isinstance(application, QApplication):
+        apply_theme(application, theme_of_key(""))
+    ErrorDialog(STARTUP_ERROR_TITLE, message).exec()
+
+
+def use_offscreen_without_display() -> None:
+    if sys.platform.startswith("linux") and not any(
+        os.environ.get(name) for name in DISPLAY_VARIABLES
+    ):
+        os.environ.setdefault(PLATFORM_VARIABLE, OFFSCREEN_PLATFORM)
+
+
+def create_application() -> QApplication:
+    app = QApplication([])
+    app.setApplicationName(APPLICATION_NAME)
+    app.setApplicationDisplayName(APPLICATION_NAME)
+    app.setDesktopFileName(APPLICATION_DIRECTORY_NAME)
+    app.setWindowIcon(QIcon(str(icon_path())))
+    app.setQuitOnLastWindowClosed(False)
+    return app
+
+
+def run_core(headless: bool) -> None:
+    if headless:
+        use_offscreen_without_display()
     database = DatabaseManager.instance()
+    server: CoreServer | None = None
     try:
         purge_expired_cache(database)
-        app = QApplication([])
-        app.setApplicationName(APPLICATION_NAME)
-        app.setApplicationDisplayName(APPLICATION_NAME)
-        app.setDesktopFileName(APPLICATION_DIRECTORY_NAME)
-        app.setWindowIcon(QIcon(str(icon_path())))
+        app = create_application()
         repository = ConfigRepository(database)
-        theme = theme_of_key(repository.theme_key())
-        apply_theme(app, theme)
-        window = MainWindow(repository, database, theme)
-        window.show()
+        apply_theme(app, theme_of_key(repository.theme_key()))
+        mcp = build_server(McpSession(database))
+        server = CoreServer(partial(serve_connection, mcp))
+        core = PanelCore(repository, database, server)
+        server.start()
+        if not headless:
+            core.show_window()
+        core.check_idle()
         app.exec()
     finally:
+        if server is not None:
+            server.close()
         QThreadPool.globalInstance().waitForDone(TASK_SHUTDOWN_TIMEOUT_MS)
         database.close()
+
+
+def main() -> None:
+    headless = HEADLESS_ARGUMENT in sys.argv[1:]
+    lock = acquire_core_lock(headless)
+    if lock is None:
+        return
+    try:
+        run_core(headless)
+    finally:
+        lock.unlock()
 
 
 if __name__ == "__main__":

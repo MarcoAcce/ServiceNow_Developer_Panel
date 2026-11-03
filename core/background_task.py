@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from shiboken6 import Shiboken
 
 
 class BackgroundTask(QObject):
@@ -24,11 +25,14 @@ class BackgroundTask(QObject):
         try:
             value = self._work()
         except Exception as error:
-            if not self._cancelled:
+            if self._deliverable():
                 self.failed.emit(str(error))
             return
-        if not self._cancelled:
+        if self._deliverable():
             self.finished.emit(value)
+
+    def _deliverable(self) -> bool:
+        return not self._cancelled and Shiboken.isValid(self)
 
 
 class TaskRunnable(QRunnable):
