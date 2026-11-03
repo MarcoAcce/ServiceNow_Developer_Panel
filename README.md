@@ -19,7 +19,9 @@ This tool provides read-only methods, although PUT calls may be added in the fut
 
 # Warning notice
 
-This tool pulls data from a selected ServiceNow instance, using user provided authentication, to process it locally. Always make sure not to violate your organization's policies. I do not in any way condone misuse of this tool.
+This project is an independent, community tool: it is not affiliated with or endorsed by ServiceNow. ServiceNow is a trademark of ServiceNow, Inc.
+
+This tool pulls data from a selected ServiceNow instance, using user provided authentication, to process it locally. Always make sure not to violate your organization's policies. I do not in any way condone misuse of this tool. To report a vulnerability, or to see what the tool stores and how, read the [security policy](SECURITY.md).
 
 # How to use it
 
@@ -36,6 +38,8 @@ Each release includes two setup executables, for [Windows](https://github.com/Ma
 
 Simply download the setup for your system and run it to install the application (portable ~180MB, but you can build the project yourself to save storage). 
 
+The installers are not code-signed, so Windows SmartScreen may warn you the first time you run the setup. See [Building and installing](docs/build.md) for what to expect, how to verify the download and how to build it yourself.
+
 # Code stuff
 
 This project is written entirely in Python. 
@@ -43,4 +47,4 @@ I used `Pyside6` for the UI and the `mcp` package for the MCP server.
 The list of packages needed to build this application is in the `requirement.txt` file.
 
 `build_linux.sh` and `build_windows.sh` build the application and its installer with a
-single command.
+single command. See [Building and installing](docs/build.md).
