@@ -1,6 +1,6 @@
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -64,6 +64,10 @@ PERSISTENT_CACHE_TITLE: str = "Use persistent cache"
 PERSISTENT_CACHE_MESSAGE: str = (
     "The queries of {name} will be temporarily saved to local persistent storage."
 )
+CACHE_PURGE_MESSAGE: str = (
+    "\nEvery cached response of {name} will be deleted.\nThis cannot be undone."
+)
+CACHE_MODE_SAVED_MESSAGE: str = "{name} now uses the {label} cache, {count} responses deleted."
 NO_INSTANCE_MESSAGE: str = "No instance configured yet. Use the button above to add the first one."
 NO_AUTHENTICATION_MESSAGE: str = "No authentication method configured for this instance."
 UNREADABLE_MESSAGE: str = "Stored on another machine or user account, the details cannot be read."
@@ -628,7 +632,13 @@ class ConfigTab(Tab):
             if in_memory_cache
             else (PERSISTENT_CACHE_TITLE, PERSISTENT_CACHE_MESSAGE)
         )
-        if not ask_confirmation(self, title, message.format(name=instance.name)):
+        confirmed = ask_confirmation(
+            self,
+            title,
+            message.format(name=instance.name) + CACHE_PURGE_MESSAGE.format(name=instance.name),
+            destructive=True,
+        )
+        if not confirmed:
             card.set_in_memory_cache(not in_memory_cache)
             return
         try:
@@ -637,6 +647,19 @@ class ConfigTab(Tab):
             card.set_in_memory_cache(not in_memory_cache)
             self._show_database_error(error)
             return
+        try:
+            purged = self._database.purge_instance_responses(instance.id)
+        except (sqlite3.Error, DatabaseError, OSError, TimeoutError) as error:
+            self._show_database_error(error)
+        else:
+            show_status(
+                self.cache_status_label,
+                CACHE_MODE_SAVED_MESSAGE.format(
+                    name=instance.name,
+                    label=replace(instance, in_memory_cache=in_memory_cache).cache_label.lower(),
+                    count=purged,
+                ),
+            )
         self._announce()
 
     def _on_add_authentication(

@@ -143,6 +143,7 @@ SEED_STATEMENTS: tuple[tuple[str, tuple[object, ...]], ...] = (
 
 CONFIGURATION_VALUE_QUERY: str = "SELECT value FROM local_configuration WHERE name = ?"
 EXPIRED_RESPONSE_QUERY: str = "SELECT id, cache_name FROM response WHERE received_at <= ?"
+INSTANCE_RESPONSE_QUERY: str = "SELECT id, cache_name FROM response WHERE instance_id = ?"
 CACHE_NAME_QUERY: str = "SELECT cache_name FROM response"
 RESPONSE_DELETE: str = "DELETE FROM response WHERE id = ?"
 
@@ -239,10 +240,16 @@ class DatabaseManager:
     def purge_expired_responses(self) -> int:
         cutoff = datetime.now() - timedelta(minutes=self.cache_lifetime_minutes())
         expired = self.query(EXPIRED_RESPONSE_QUERY, (cutoff.strftime(RESPONSE_TIME_FORMAT),))
-        if not expired:
+        return self._purge_responses(expired)
+
+    def purge_instance_responses(self, instance_id: int) -> int:
+        return self._purge_responses(self.query(INSTANCE_RESPONSE_QUERY, (instance_id,)))
+
+    def _purge_responses(self, rows: Sequence[sqlite3.Row]) -> int:
+        if not rows:
             return 0
         identifiers: list[tuple[int]] = []
-        for row in expired:
+        for row in rows:
             delete_cache(str(row["cache_name"]))
             identifiers.append((int(row["id"]),))
 

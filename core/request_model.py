@@ -63,6 +63,10 @@ class RequestTarget:
         return self.instance.address if self.instance is not None else ""
 
     @property
+    def cache_label(self) -> str:
+        return self.instance.cache_label if self.instance is not None else ""
+
+    @property
     def authentication_label(self) -> str:
         if self.authentication is None:
             return NO_AUTHENTICATION_LABEL
