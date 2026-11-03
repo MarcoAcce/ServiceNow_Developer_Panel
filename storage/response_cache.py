@@ -1,8 +1,10 @@
 import hashlib
 import re
 import sqlite3
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+import threading
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +19,9 @@ DEFAULT_NAME: str = "unnamed"
 DEFAULT_TABLE_NAME: str = "response"
 DEFAULT_COLUMN_NAME: str = "value"
 TABLE_NAMES_QUERY: str = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+MEMORY_DATABASE: str = ":memory:"
+READ_ONLY_MODE: str = "?mode=ro"
+QUERY_ONLY_PRAGMA: str = "PRAGMA query_only = {enabled}"
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,16 @@ class CacheTable:
     name: str
     columns: tuple[str, ...]
     records: list[dict[str, str]]
+
+
+@dataclass
+class MemoryCache:
+    connection: sqlite3.Connection
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+_memory_caches: dict[str, MemoryCache] = {}
+_memory_lock: threading.Lock = threading.Lock()
 
 
 def slug(value: str) -> str:
@@ -55,32 +70,52 @@ def cache_table(
 
 
 def write_cache(
-    name: str, table: str, columns: Sequence[str], records: Sequence[dict[str, str]]
-) -> Path:
-    return write_cache_tables(name, (cache_table(table, columns, records),))
+    name: str,
+    table: str,
+    columns: Sequence[str],
+    records: Sequence[dict[str, str]],
+    in_memory: bool = False,
+) -> None:
+    write_cache_tables(name, (cache_table(table, columns, records),), in_memory)
 
 
-def write_cache_tables(name: str, tables: Sequence[CacheTable]) -> Path:
-    path = cache_path(name)
-    connection = sqlite3.connect(path)
+def write_cache_tables(
+    name: str, tables: Sequence[CacheTable], in_memory: bool = False
+) -> None:
+    if in_memory:
+        _write_memory_cache(name, tables)
+        return
+    connection = sqlite3.connect(cache_path(name))
     try:
         with connection:
             for table in tables:
                 fill_table(connection, table)
     finally:
         connection.close()
-    return path
+
+
+def _write_memory_cache(name: str, tables: Sequence[CacheTable]) -> None:
+    connection = sqlite3.connect(MEMORY_DATABASE, check_same_thread=False)
+    try:
+        with connection:
+            for table in tables:
+                fill_table(connection, table)
+    except BaseException:
+        connection.close()
+        raise
+    with _memory_lock:
+        previous = _memory_caches.pop(name, None)
+        _memory_caches[name] = MemoryCache(connection=connection)
+    if previous is not None:
+        _close_memory_cache(previous)
 
 
 def append_cache_table(name: str, table: CacheTable) -> bool:
     if not cache_exists(name):
         return False
-    connection = sqlite3.connect(cache_path(name))
-    try:
+    with cache_connection(name) as connection:
         with connection:
             fill_table(connection, table)
-    finally:
-        connection.close()
     return True
 
 
@@ -94,7 +129,42 @@ def fill_table(connection: sqlite3.Connection, table: CacheTable) -> None:
 
 
 def cache_exists(name: str) -> bool:
-    return bool(name) and cache_path(name).is_file()
+    if not name:
+        return False
+    return _memory_cache(name) is not None or cache_path(name).is_file()
+
+
+@contextmanager
+def cache_connection(name: str, read_only: bool = False) -> Iterator[sqlite3.Connection]:
+    memory = _memory_cache(name)
+    if memory is not None:
+        with memory.lock:
+            yield from _memory_connection(memory.connection, read_only)
+        return
+    connection = _file_connection(cache_path(name), read_only)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _memory_connection(
+    connection: sqlite3.Connection, read_only: bool
+) -> Iterator[sqlite3.Connection]:
+    if not read_only:
+        yield connection
+        return
+    connection.execute(QUERY_ONLY_PRAGMA.format(enabled="ON"))
+    try:
+        yield connection
+    finally:
+        connection.execute(QUERY_ONLY_PRAGMA.format(enabled="OFF"))
+
+
+def _file_connection(path: Path, read_only: bool) -> sqlite3.Connection:
+    if not read_only:
+        return sqlite3.connect(path)
+    return sqlite3.connect(f"{path.resolve().as_uri()}{READ_ONLY_MODE}", uri=True)
 
 
 def read_cache(name: str) -> list[dict[str, str]] | None:
@@ -107,23 +177,17 @@ def read_cache(name: str) -> list[dict[str, str]] | None:
 def read_cache_tables(name: str) -> list[CacheTable] | None:
     if not cache_exists(name):
         return None
-    connection = sqlite3.connect(cache_path(name))
-    try:
+    with cache_connection(name) as connection:
         names = [str(row[0]) for row in connection.execute(TABLE_NAMES_QUERY).fetchall()]
         return [read_table(connection, table_name) for table_name in names]
-    finally:
-        connection.close()
 
 
 def cache_row_counts(name: str) -> dict[str, int] | None:
     if not cache_exists(name):
         return None
-    connection = sqlite3.connect(cache_path(name))
-    try:
+    with cache_connection(name) as connection:
         names = [str(row[0]) for row in connection.execute(TABLE_NAMES_QUERY).fetchall()]
         return {table_name: count_rows(connection, table_name) for table_name in names}
-    finally:
-        connection.close()
 
 
 def count_rows(connection: sqlite3.Connection, name: str) -> int:
@@ -148,6 +212,10 @@ def text_of(value: object) -> str:
 def delete_cache(name: str) -> bool:
     if not name:
         return False
+    with _memory_lock:
+        memory = _memory_caches.pop(name, None)
+    if memory is not None:
+        _close_memory_cache(memory)
     try:
         cache_path(name).unlink(missing_ok=True)
     except OSError:
@@ -156,11 +224,24 @@ def delete_cache(name: str) -> bool:
 
 
 def cache_names() -> tuple[str, ...]:
+    with _memory_lock:
+        names = set(_memory_caches)
     try:
-        entries = sorted(cache_directory().glob(f"*{CACHE_SUFFIX}"))
+        entries = cache_directory().glob(f"*{CACHE_SUFFIX}")
+        names.update(entry.name for entry in entries if entry.is_file())
     except OSError:
-        return ()
-    return tuple(entry.name for entry in entries if entry.is_file())
+        pass
+    return tuple(sorted(names))
+
+
+def _memory_cache(name: str) -> MemoryCache | None:
+    with _memory_lock:
+        return _memory_caches.get(name)
+
+
+def _close_memory_cache(memory: MemoryCache) -> None:
+    with memory.lock:
+        memory.connection.close()
 
 
 def create_statement(table: str, names: Iterable[str]) -> str:

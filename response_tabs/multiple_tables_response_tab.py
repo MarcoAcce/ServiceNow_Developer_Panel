@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.app_paths import cache_path
 from core.background_task import BackgroundTask
 from storage.cache_query import MAXIMUM_ROWS, QueryOutcome, run_script
 from ui.dialogs import CLOSE_LABEL, FramelessDialog, ask_confirmation
@@ -305,11 +304,11 @@ class MultipleTablesResponseTab(ResponseTab):
     def _on_execute_clicked(self) -> None:
         if self._query_task is not None:
             return
-        path = cache_path(self.result.cache_name)
+        name = self.result.cache_name
         script = self.query_input.toPlainText()
         show_status(self.console_status_label, RUNNING_QUERY_MESSAGE)
         self.execute_button.setEnabled(False)
-        task = BackgroundTask(lambda: run_script(path, script), self)
+        task = BackgroundTask(lambda: run_script(name, script), self)
         task.finished.connect(self._on_query_finished)
         task.failed.connect(self._on_query_failed)
         self._query_task = task

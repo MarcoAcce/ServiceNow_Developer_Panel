@@ -11,6 +11,8 @@ from ui.ui_widgets import hint_label, section_label
 
 INSTANCE_LABEL: str = "Instance"
 AUTHENTICATION_LABEL: str = "Authentication"
+CACHE_LABEL: str = "Cache"
+COMPACT_CACHE_TEXT: str = "{label} cache"
 NO_INSTANCE_TEXT: str = "No instance configured"
 NO_INSTANCE_HINT: str = "Add an instance in the configuration tab to send the requests to it."
 UNREADABLE_TEXT: str = "stored on another machine, the details cannot be read"
@@ -30,6 +32,7 @@ class InstanceSelector(QWidget):
         self._instances: list[Instance] = []
         self.instance_field: QComboBox = QComboBox()
         self.authentication_label: QLabel = hint_label("")
+        self.cache_label: QLabel = hint_label("")
         self.hint_label: QLabel = hint_label(NO_INSTANCE_HINT)
         self._build_ui()
         self.reload()
@@ -89,6 +92,7 @@ class InstanceSelector(QWidget):
         layout.addWidget(section_label(INSTANCE_LABEL))
         layout.addWidget(self.instance_field)
         layout.addWidget(self.authentication_label, 1)
+        layout.addWidget(self.cache_label)
         self.hint_label.setVisible(False)
 
     def _build_full(self) -> None:
@@ -97,6 +101,7 @@ class InstanceSelector(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addRow(INSTANCE_LABEL, self.instance_field)
         layout.addRow(AUTHENTICATION_LABEL, self.authentication_label)
+        layout.addRow(CACHE_LABEL, self.cache_label)
         layout.addRow(self.hint_label)
 
     def _refresh_details(self) -> None:
@@ -105,9 +110,16 @@ class InstanceSelector(QWidget):
         if instance is None:
             self.instance_field.setToolTip("")
             self.authentication_label.setText(NO_AUTHENTICATION_LABEL)
+            self.cache_label.setText("")
             return
         self.instance_field.setToolTip(instance.address)
         self.authentication_label.setText(self._authentication_text(instance))
+        self.cache_label.setText(self._cache_text(instance))
+
+    def _cache_text(self, instance: Instance) -> str:
+        if self._compact:
+            return COMPACT_CACHE_TEXT.format(label=instance.cache_label)
+        return instance.cache_label
 
     def _authentication_text(self, instance: Instance) -> str:
         authentication = self._repository.active_authentication(instance.id)

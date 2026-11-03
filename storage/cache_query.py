@@ -1,13 +1,11 @@
 import sqlite3
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
-from storage.response_cache import text_of
+from storage.response_cache import cache_connection, cache_exists, text_of
 
 MAXIMUM_ROWS: int = 2000
 STATEMENT_END: str = ";"
-READ_ONLY_MODE: str = "?mode=ro"
 QUERY_TIMEOUT_SECONDS: float = 30.0
 PROGRESS_INTERVAL: int = 10000
 DENIED_ACTIONS: frozenset[int] = frozenset({sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH})
@@ -62,27 +60,31 @@ def is_statement(text: str) -> bool:
     return bool(text.strip().strip(STATEMENT_END).strip())
 
 
-def run_script(path: Path, script: str, read_only: bool = False) -> QueryOutcome:
+def run_script(name: str, script: str, read_only: bool = False) -> QueryOutcome:
     statements = split_statements(script)
     if not statements:
         raise ValueError(EMPTY_SCRIPT_MESSAGE)
-    if not path.is_file():
+    if not cache_exists(name):
         raise ValueError(MISSING_CACHE_MESSAGE)
-    connection = open_cache(path, read_only)
-    try:
-        return _run_statements(connection, statements)
-    finally:
-        connection.close()
+    with cache_connection(name, read_only) as connection:
+        if not read_only:
+            return _run_statements(connection, statements)
+        sandbox(connection)
+        try:
+            return _run_statements(connection, statements)
+        finally:
+            release_sandbox(connection)
 
 
-def open_cache(path: Path, read_only: bool) -> sqlite3.Connection:
-    if not read_only:
-        return sqlite3.connect(path)
-    connection = sqlite3.connect(f"{path.resolve().as_uri()}{READ_ONLY_MODE}", uri=True)
+def sandbox(connection: sqlite3.Connection) -> None:
     connection.set_authorizer(sandbox_authorizer)
     deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
     connection.set_progress_handler(lambda: int(time.monotonic() > deadline), PROGRESS_INTERVAL)
-    return connection
+
+
+def release_sandbox(connection: sqlite3.Connection) -> None:
+    connection.set_authorizer(None)
+    connection.set_progress_handler(None, PROGRESS_INTERVAL)
 
 
 def sandbox_authorizer(
@@ -105,6 +107,7 @@ def _run_statements(
     columns: tuple[str, ...] = ()
     rows: list[tuple[str, ...]] = []
     truncated: bool = False
+    changes: int = connection.total_changes
     with connection:
         cursor = connection.cursor()
         for statement in statements:
@@ -121,5 +124,5 @@ def _run_statements(
         columns=columns,
         rows=rows,
         truncated=truncated,
-        changes=connection.total_changes,
+        changes=connection.total_changes - changes,
     )

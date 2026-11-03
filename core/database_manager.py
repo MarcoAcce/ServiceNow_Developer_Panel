@@ -19,7 +19,7 @@ DEFAULT_THEME_KEY: str = "light"
 DEFAULT_CACHE_LIFETIME_MINUTES: int = 5
 DEFAULT_SUGGESTION_COUNT: int = 15
 RESPONSE_TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
-SCHEMA_VERSION: int = 6
+SCHEMA_VERSION: int = 7
 STARTUP_TIMEOUT_SECONDS: float = 15.0
 WRITE_TIMEOUT_SECONDS: float = 15.0
 SHUTDOWN_TIMEOUT_SECONDS: float = 15.0
@@ -42,7 +42,8 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS instance (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
-        address TEXT NOT NULL
+        address TEXT NOT NULL,
+        in_memory_cache INTEGER NOT NULL DEFAULT 0 CHECK (in_memory_cache IN (0, 1))
     )
     """,
     """
@@ -114,6 +115,16 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         ON mcp_authentication (instance_id) WHERE active = 1
     """,
 )
+
+COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "instance",
+        "in_memory_cache",
+        "ALTER TABLE instance ADD COLUMN in_memory_cache INTEGER NOT NULL DEFAULT 0 "
+        "CHECK (in_memory_cache IN (0, 1))",
+    ),
+)
+TABLE_COLUMNS_QUERY: str = "SELECT name FROM pragma_table_info(?)"
 
 SEED_STATEMENTS: tuple[tuple[str, tuple[object, ...]], ...] = (
     (
@@ -299,9 +310,16 @@ class DatabaseManager:
         with connection:
             for statement in SCHEMA_STATEMENTS:
                 connection.execute(statement)
+            self._migrate_columns(connection)
             for statement, parameters in SEED_STATEMENTS:
                 connection.execute(statement, parameters)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _migrate_columns(self, connection: sqlite3.Connection) -> None:
+        for table, column, statement in COLUMN_MIGRATIONS:
+            rows = connection.execute(TABLE_COLUMNS_QUERY, (table,)).fetchall()
+            if column not in {str(row["name"]) for row in rows}:
+                connection.execute(statement)
 
     def _read_connection(self) -> sqlite3.Connection:
         if self._closed:

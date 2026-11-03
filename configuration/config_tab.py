@@ -52,6 +52,18 @@ COLLAPSE_LABEL: str = "Collapse"
 EDIT_LABEL: str = "Edit"
 DELETE_LABEL: str = "Delete"
 ACTIVE_LABEL: str = "Active"
+IN_MEMORY_CACHE_LABEL: str = "In-memory cache"
+IN_MEMORY_CACHE_TOOLTIP: str = (
+    "Keep the cached responses of this instance in memory instead of the local disk"
+)
+IN_MEMORY_CACHE_TITLE: str = "Use in-memory cache"
+IN_MEMORY_CACHE_MESSAGE: str = (
+    "Using in-memory caching for {name} will result in increased RAM usage."
+)
+PERSISTENT_CACHE_TITLE: str = "Use persistent cache"
+PERSISTENT_CACHE_MESSAGE: str = (
+    "The queries of {name} will be temporarily saved to local persistent storage."
+)
 NO_INSTANCE_MESSAGE: str = "No instance configured yet. Use the button above to add the first one."
 NO_AUTHENTICATION_MESSAGE: str = "No authentication method configured for this instance."
 UNREADABLE_MESSAGE: str = "Stored on another machine or user account, the details cannot be read."
@@ -247,6 +259,7 @@ class InstanceCard(QFrame):
     expandRequested = Signal(object)
     collapseRequested = Signal(object)
     deleteRequested = Signal(object)
+    inMemoryCacheToggled = Signal(object, bool)
     addAuthenticationRequested = Signal(object, object)
     authenticationActiveToggled = Signal(object, bool, object)
     authenticationEditRequested = Signal(object, object)
@@ -257,6 +270,7 @@ class InstanceCard(QFrame):
         self.instance: Instance = instance
         self._expanded: bool = expanded
         self._toggle_button: QPushButton = QPushButton(COLLAPSE_LABEL if expanded else EXPAND_LABEL)
+        self.in_memory_box: QCheckBox = QCheckBox(IN_MEMORY_CACHE_LABEL)
         self._body: QWidget = QWidget()
         self._body_layout: QVBoxLayout = QVBoxLayout(self._body)
         self._build_ui()
@@ -269,6 +283,11 @@ class InstanceCard(QFrame):
             if index:
                 self._body_layout.addWidget(horizontal_rule())
             self._body_layout.addWidget(self._build_list(section, authentications))
+
+    def set_in_memory_cache(self, in_memory_cache: bool) -> None:
+        self.in_memory_box.blockSignals(True)
+        self.in_memory_box.setChecked(in_memory_cache)
+        self.in_memory_box.blockSignals(False)
 
     def _build_ui(self) -> None:
         as_card(self)
@@ -283,6 +302,12 @@ class InstanceCard(QFrame):
         header = QHBoxLayout()
         header.addWidget(section_label(self.instance.name))
         header.addWidget(hint_label(self.instance.address), 1)
+        self.in_memory_box.setToolTip(IN_MEMORY_CACHE_TOOLTIP)
+        self.set_in_memory_cache(self.instance.in_memory_cache)
+        self.in_memory_box.toggled.connect(
+            lambda checked: self.inMemoryCacheToggled.emit(self.instance, checked)
+        )
+        header.addWidget(self.in_memory_box)
         self._toggle_button.clicked.connect(self._on_toggle_clicked)
         header.addWidget(self._toggle_button)
         delete_button = danger_button(DELETE_LABEL)
@@ -447,6 +472,9 @@ class ConfigTab(Tab):
         card.expandRequested.connect(self._on_expand)
         card.collapseRequested.connect(self._on_collapse)
         card.deleteRequested.connect(self._on_delete_instance)
+        card.inMemoryCacheToggled.connect(
+            lambda instance, checked: self._on_in_memory_cache_toggled(card, instance, checked)
+        )
         card.addAuthenticationRequested.connect(self._on_add_authentication)
         card.authenticationActiveToggled.connect(self._on_authentication_active_toggled)
         card.authenticationEditRequested.connect(self._on_edit_authentication)
@@ -590,6 +618,25 @@ class ConfigTab(Tab):
             return
         if self._expanded_instance_id == instance.id:
             self._expanded_instance_id = None
+        self._announce()
+
+    def _on_in_memory_cache_toggled(
+        self, card: InstanceCard, instance: Instance, in_memory_cache: bool
+    ) -> None:
+        title, message = (
+            (IN_MEMORY_CACHE_TITLE, IN_MEMORY_CACHE_MESSAGE)
+            if in_memory_cache
+            else (PERSISTENT_CACHE_TITLE, PERSISTENT_CACHE_MESSAGE)
+        )
+        if not ask_confirmation(self, title, message.format(name=instance.name)):
+            card.set_in_memory_cache(not in_memory_cache)
+            return
+        try:
+            self._repository.set_in_memory_cache(instance.id, in_memory_cache)
+        except (sqlite3.Error, DatabaseError) as error:
+            card.set_in_memory_cache(not in_memory_cache)
+            self._show_database_error(error)
+            return
         self._announce()
 
     def _on_add_authentication(

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
+from configuration.config_repository import Instance
 from core.database_manager import RESPONSE_TIME_FORMAT, DatabaseManager
 from storage.response_cache import (
     CacheTable,
@@ -53,6 +54,7 @@ NAMED_QUERY: str = (
     "SELECT id, instance_id, request_type, received_at, request_details, cache_name "
     "FROM response WHERE cache_name = ? ORDER BY received_at DESC, id DESC LIMIT 1"
 )
+CACHE_MODE_QUERY: str = "SELECT in_memory_cache FROM instance WHERE id = ?"
 TABLE_KEY: str = "table"
 PARAMETERS_KEY: str = "parameters"
 PARTS_KEY: str = "parts"
@@ -148,7 +150,8 @@ class ResponseRepository:
         if instance is None or result.cache_name:
             return result
         name = cache_name(instance.name, result.request_type.key, result.executed_at)
-        return replace(result, cache_name=name)
+        target = replace(result.target, instance=self._configured(instance))
+        return replace(result, request=replace(result.request, target=target), cache_name=name)
 
     def record(self, result: RequestResult) -> int:
         instance = result.target.instance
@@ -170,11 +173,17 @@ class ResponseRepository:
         response_id = int(self._database.write_and_wait(operation))
         delete_cache(name)
         try:
-            write_cache_tables(name, cache_tables_of(result))
+            write_cache_tables(name, cache_tables_of(result), instance.in_memory_cache)
         except (OSError, sqlite3.Error):
             self.delete(response_id)
             raise
         return response_id
+
+    def _configured(self, instance: Instance) -> Instance:
+        row = self._database.query_one(CACHE_MODE_QUERY, (instance.id,))
+        if row is None:
+            return instance
+        return replace(instance, in_memory_cache=bool(row["in_memory_cache"]))
 
     def load_cached(self, request: RequestSpec) -> CachedResponse | None:
         instance = request.target.instance

@@ -97,6 +97,7 @@ class ResponseTab(Tab):
         self.status_label: QLabel = QLabel()
         self.instance_label: QLabel = QLabel()
         self.authentication_label: QLabel = QLabel()
+        self.cache_label: QLabel = QLabel()
         self.source_label: QLabel = QLabel()
         self.status_value_label: QLabel = QLabel()
         self.received_label: QLabel = QLabel()
@@ -155,6 +156,7 @@ class ResponseTab(Tab):
     def build_summary_rows(self, layout: QFormLayout) -> None:
         layout.addRow("Instance", self.instance_label)
         layout.addRow("Authentication", self.authentication_label)
+        layout.addRow("Cache", self.cache_label)
         layout.addRow("Source", self.source_label)
         layout.addRow("Status", self.status_value_label)
         layout.addRow("Received", self.received_label)
@@ -216,6 +218,7 @@ class ResponseTab(Tab):
             f"{target.label}{ADDRESS_SEPARATOR}{address}" if address else target.label
         )
         self.authentication_label.setText(target.authentication_label)
+        self.cache_label.setText(target.cache_label)
         self.source_label.setText(self.result.source)
         self.status_value_label.setText(
             f"{self.result.status_code} in {self.result.elapsed_ms} ms"

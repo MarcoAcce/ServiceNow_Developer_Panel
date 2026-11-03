@@ -12,7 +12,12 @@ from core.database_manager import (
 )
 from core.secret_store import SecretError, decode_details, encode_details
 
-INSTANCE_QUERY: str = "SELECT id, name, address FROM instance ORDER BY name COLLATE NOCASE"
+INSTANCE_QUERY: str = (
+    "SELECT id, name, address, in_memory_cache FROM instance ORDER BY name COLLATE NOCASE"
+)
+INSTANCE_CACHE_UPDATE: str = "UPDATE instance SET in_memory_cache = ? WHERE id = ?"
+PERSISTENT_CACHE_LABEL: str = "Persistent"
+IN_MEMORY_CACHE_LABEL: str = "In-memory"
 AUTHENTICATION_TABLE: str = "authentication"
 MCP_AUTHENTICATION_TABLE: str = "mcp_authentication"
 AUTHENTICATION_QUERY: str = (
@@ -50,6 +55,11 @@ class Instance:
     id: int
     name: str
     address: str
+    in_memory_cache: bool = False
+
+    @property
+    def cache_label(self) -> str:
+        return IN_MEMORY_CACHE_LABEL if self.in_memory_cache else PERSISTENT_CACHE_LABEL
 
 
 @dataclass(frozen=True)
@@ -75,7 +85,15 @@ class ConfigRepository:
 
     def list_instances(self) -> list[Instance]:
         rows = self._database.query(INSTANCE_QUERY)
-        return [Instance(id=row["id"], name=row["name"], address=row["address"]) for row in rows]
+        return [
+            Instance(
+                id=row["id"],
+                name=row["name"],
+                address=row["address"],
+                in_memory_cache=bool(row["in_memory_cache"]),
+            )
+            for row in rows
+        ]
 
     def list_authentications(self, instance_id: int) -> list[Authentication]:
         return self._list_authentications(AUTHENTICATION_TABLE, instance_id)
@@ -142,6 +160,12 @@ class ConfigRepository:
             return int(cursor.lastrowid or 0)
 
         return int(self._database.write_and_wait(operation))
+
+    def set_in_memory_cache(self, instance_id: int, in_memory_cache: bool) -> None:
+        def operation(connection: sqlite3.Connection) -> None:
+            connection.execute(INSTANCE_CACHE_UPDATE, (int(in_memory_cache), instance_id))
+
+        self._database.write_and_wait(operation)
 
     def delete_instance(self, instance_id: int) -> None:
         def operation(connection: sqlite3.Connection) -> None:

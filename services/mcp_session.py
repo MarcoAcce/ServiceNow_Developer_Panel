@@ -12,7 +12,7 @@ from core.acl.acl_controls import controls_of
 from core.acl.acl_report import VerificationPayload, outcome_payload
 from core.acl.acl_requests import verification_request
 from core.acl.acl_verification import FIELD_OPERATIONS, Verification, evaluate, normalized_profiles
-from core.app_paths import cache_path, data_directory
+from core.app_paths import data_directory
 from storage.cache_query import run_script
 from configuration.config_repository import ConfigRepository, Instance
 from core.database_manager import RESPONSE_TIME_FORMAT, DatabaseError, DatabaseManager
@@ -438,7 +438,7 @@ class McpSession:
         with local_failures():
             name = checked_cache_name(cache_name)
             try:
-                outcome = run_script(cache_path(name), sql, read_only=True)
+                outcome = run_script(name, sql, read_only=True)
             except (ValueError, sqlite3.Error) as error:
                 raise ToolError(QUERY_FAILED_MESSAGE.format(error=error)) from None
             return QueryResult(
