@@ -6,7 +6,14 @@ from functools import partial
 
 from PySide6.QtCore import QLockFile, QObject, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QMenu,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.app_paths import APPLICATION_DIRECTORY_NAME, icon_path
 from core.core_channel import (
@@ -61,6 +68,8 @@ STARTUP_ERROR_TITLE: str = "ServiceNow Developer Panel not started"
 PLATFORM_VARIABLE: str = "QT_QPA_PLATFORM"
 DISPLAY_VARIABLES: tuple[str, ...] = ("DISPLAY", "WAYLAND_DISPLAY")
 OFFSCREEN_PLATFORM: str = "offscreen"
+TRAY_OPEN_LABEL: str = "Open ServiceNow Developer Panel"
+TRAY_CLIENTS_TOOLTIP: str = "{name}\nMCP clients connected: {count}"
 
 
 def instance_service(parent: QWidget) -> RequestService:
@@ -274,8 +283,11 @@ class PanelCore(QObject):
         self._idle_timer.setSingleShot(True)
         self._idle_timer.setInterval(IDLE_GRACE_PERIOD_MS)
         self._idle_timer.timeout.connect(self._quit_if_idle)
+        self._tray_menu: QMenu = QMenu()
+        self._tray: QSystemTrayIcon | None = self._build_tray()
         server.windowRequested.connect(self.show_window)
         server.clientsChanged.connect(self.check_idle)
+        server.clientsChanged.connect(self._update_tray)
 
     def show_window(self) -> None:
         window = self._window
@@ -302,13 +314,39 @@ class PanelCore(QObject):
     def _is_idle(self) -> bool:
         return self._window is None and self._server.client_count == 0
 
+    def _build_tray(self) -> QSystemTrayIcon | None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return None
+        tray = QSystemTrayIcon(QIcon(str(icon_path())), self)
+        self._tray_menu.addAction(TRAY_OPEN_LABEL, self.show_window)
+        tray.setContextMenu(self._tray_menu)
+        tray.activated.connect(self._on_tray_activated)
+        tray.setToolTip(tray_tooltip(self._server.client_count))
+        tray.show()
+        return tray
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_window()
+
+    def _update_tray(self, count: int) -> None:
+        if self._tray is not None:
+            self._tray.setToolTip(tray_tooltip(count))
+
     def _on_window_destroyed(self) -> None:
         self._window = None
         self.check_idle()
 
     def _quit_if_idle(self) -> None:
-        if self._is_idle():
-            QApplication.quit()
+        if not self._is_idle():
+            return
+        if self._tray is not None:
+            self._tray.hide()
+        QApplication.quit()
+
+
+def tray_tooltip(count: int) -> str:
+    return TRAY_CLIENTS_TOOLTIP.format(name=APPLICATION_NAME, count=count)
 
 
 def purge_expired_cache(database: DatabaseManager) -> None:

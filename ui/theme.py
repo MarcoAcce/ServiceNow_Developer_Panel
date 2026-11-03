@@ -206,9 +206,9 @@ def apply_theme(application: QApplication, theme: Theme) -> None:
     global _current_theme
     _current_theme = theme
     load_fonts()
-    application.setFont(build_font(application))
     application.setPalette(build_palette(theme))
     application.setStyleSheet(build_stylesheet(theme))
+    application.setFont(build_font(application))
 
 
 def build_palette(theme: Theme) -> QPalette:
