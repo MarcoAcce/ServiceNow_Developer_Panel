@@ -19,6 +19,7 @@ from core.app_paths import (
 )
 
 CORE_PROTOCOL_VERSION: int = 1
+IDLE_GRACE_PERIOD_SECONDS: int = 30
 HEADLESS_ARGUMENT: str = "--headless"
 MCP_CLIENT: str = "mcp"
 WINDOW_CLIENT: str = "window"

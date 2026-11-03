@@ -78,6 +78,9 @@ jobs:
         timeout-minutes: 2
         run: python .github/scripts/mcp_smoke_test.py "$INSTALL_DIR/ServiceNowDeveloperPanelMcp"
 
+      - name: Wait for the core to close
+        run: sleep 45
+
       - name: Uninstall with the setup
         run: |
           dist/ServiceNowDeveloperPanelSetup --silent --uninstall --remove-data
@@ -165,6 +168,9 @@ jobs:
       - name: Test the MCP server
         timeout-minutes: 2
         run: python .github/scripts/mcp_smoke_test.py "$env:INSTALL_DIR\ServiceNowDeveloperPanelMcp.exe"
+
+      - name: Wait for the core to close
+        run: Start-Sleep -Seconds 45
 
       - name: Uninstall with the setup
         run: |

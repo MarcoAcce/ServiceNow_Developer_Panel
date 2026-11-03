@@ -16,6 +16,7 @@ from core.app_paths import (
     is_frozen,
     resource_directory,
 )
+from core.core_channel import IDLE_GRACE_PERIOD_SECONDS
 
 DISPLAY_NAME: str = "ServiceNow Developer Panel"
 COMMENT: str = "Query ServiceNow instances through the Table API"
@@ -36,6 +37,14 @@ DESKTOP_ENTRY_ESCAPES: tuple[str, ...] = ("\\", '"', "`", "$")
 EXECUTABLE_MODE: int = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
 FILE_MODE: int = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
 JSON_INDENT: int = 2
+RUNNING_MESSAGE: str = (
+    f"{DISPLAY_NAME} is still running, so it cannot be removed now.\n\n"
+    "The application keeps running in the background while its window is open or an AI "
+    "client is connected to its MCP server, and closes by itself "
+    f"{IDLE_GRACE_PERIOD_SECONDS} seconds after the last of them is closed.\n\n"
+    "Close the application window and the AI clients using the MCP server, wait "
+    f"{IDLE_GRACE_PERIOD_SECONDS} seconds, then try again."
+)
 LIBRARY_PATH_VARIABLE: str = "LD_LIBRARY_PATH"
 ORIGINAL_LIBRARY_PATH_VARIABLE: str = "LD_LIBRARY_PATH_ORIG"
 RESET_ENVIRONMENT_VARIABLE: str = "PYINSTALLER_RESET_ENVIRONMENT"
@@ -275,18 +284,21 @@ def write_manifest(target: Path, entries: tuple[str, ...], shortcuts: tuple[Path
     manifest_path(target).write_text(json.dumps(manifest, indent=JSON_INDENT), encoding="utf-8")
 
 
-def ensure_not_running(target: Path) -> None:
+def is_running(target: Path) -> bool:
     for executable in (application_executable(target), mcp_executable(target)):
         if not executable.exists():
             continue
         try:
             with open(executable, "r+b"):
                 pass
-        except OSError as error:
-            raise InstallError(
-                f"{executable.name} is running, close the application and any MCP client "
-                "using it, then try again"
-            ) from error
+        except OSError:
+            return True
+    return False
+
+
+def ensure_not_running(target: Path) -> None:
+    if is_running(target):
+        raise InstallError(RUNNING_MESSAGE)
 
 
 def validate(options: InstallOptions) -> None:

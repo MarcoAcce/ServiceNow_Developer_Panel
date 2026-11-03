@@ -11,7 +11,13 @@ If that folder is not writable, the application uses `%LOCALAPPDATA%\ServiceNowD
 
 ## Caching
 
-Every response is saved to a local database, so that it can be queried and reused.
+Responses are cached locally, so that they can be queried and reused.
+
+Each instance can use one of two caching options, chosen with the *In-memory cache* toggle in the *Configuration* tab:
+- **Persistent** (default): responses are saved to files in the `cache` folder.
+- **In-memory**: responses are kept in RAM and never written to disk. They use more memory and are lost once the application and every MCP client are closed.
+
+Switching option deletes the cached responses of that instance.
 
 - Repeated requests reuse the cached response until it expires. You can use the *refresh* button to force a new request.
 - Cached responses expire after 5 minutes by default. You can change this time in the *Configuration* tab.

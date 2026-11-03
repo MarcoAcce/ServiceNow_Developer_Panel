@@ -19,11 +19,13 @@ from PySide6.QtWidgets import (
 from core.background_task import BackgroundTask
 from installer.installation import (
     DISPLAY_NAME,
+    RUNNING_MESSAGE,
     InstallError,
     InstallOptions,
     InstallResult,
     install,
     is_installed,
+    is_running,
     launch,
     mcp_configuration,
     uninstall,
@@ -66,6 +68,7 @@ COPIED_LABEL: str = "Copied"
 LAUNCH_LABEL: str = "Launch"
 INSTALLING_MESSAGE: str = "Installing..."
 UNINSTALLING_MESSAGE: str = "Uninstalling..."
+RUNNING_TITLE: str = f"{DISPLAY_NAME} is running"
 UPDATE_MESSAGE: str = "An installation was found here: it will be updated and its data kept."
 
 
@@ -261,6 +264,9 @@ class InstallerDialog(FramelessDialog):
 
     def _start_uninstall(self) -> None:
         target = self._target_path()
+        if is_running(target):
+            show_error(self, RUNNING_TITLE, RUNNING_MESSAGE)
+            return
         if not ask_confirmation(
             self,
             UNINSTALL_LABEL,

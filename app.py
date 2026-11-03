@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from core.app_paths import APPLICATION_DIRECTORY_NAME, icon_path
 from core.core_channel import (
     HEADLESS_ARGUMENT,
+    IDLE_GRACE_PERIOD_SECONDS,
     RETRY_INTERVAL_SECONDS,
     STARTUP_TIMEOUT_SECONDS,
     UNAVAILABLE_MESSAGE,
@@ -62,7 +63,7 @@ WINDOW_TITLE: str = "ServiceNow Developer Panel"
 WINDOW_WIDTH: int = 1280
 WINDOW_HEIGHT: int = 820
 TASK_SHUTDOWN_TIMEOUT_MS: int = 15000
-IDLE_GRACE_PERIOD_MS: int = 30000
+IDLE_GRACE_PERIOD_MS: int = IDLE_GRACE_PERIOD_SECONDS * 1000
 USE_DUMMY_SERVICE: bool = False
 STARTUP_ERROR_TITLE: str = "ServiceNow Developer Panel not started"
 PLATFORM_VARIABLE: str = "QT_QPA_PLATFORM"
