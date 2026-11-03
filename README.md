@@ -14,7 +14,7 @@ From standard Table API operations, such as selecting filtered records in a tabl
 
 The same APIs used for the user interface also powers a local MCP server, so your AI model of choice can browse and study your ServiceNow instance.
 
-![Example of mcp query](images/mcp_example.gif)
+![Example of mcp query](docs/gifs/mcp_example.gif)
 
 This tool provides read-only methods, although PUT calls may be added in the future.
 
