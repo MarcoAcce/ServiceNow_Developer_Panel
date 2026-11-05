@@ -39,6 +39,10 @@ class TableDescriptionRequestTab(RequestTab):
     def active_only(self) -> bool:
         return self.active_field.isChecked()
 
+    def prefill(self, table: str, active_only: bool) -> None:
+        self.table_field.setText(table)
+        self.active_field.setChecked(active_only)
+
     def missing_requirement(self) -> str:
         return "" if self.target_table() else TABLE_REQUIRED_MESSAGE
 

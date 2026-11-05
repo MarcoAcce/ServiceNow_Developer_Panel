@@ -304,8 +304,14 @@ QToolTip {{
 QLabel {{
     background-color: transparent;
 }}
+QLabel:disabled {{
+    color: {rgb(theme.text_disabled)};
+}}
 QLabel[{ROLE_PROPERTY}="{Role.HINT}"] {{
     color: {rgb(theme.text_secondary)};
+}}
+QLabel[{ROLE_PROPERTY}="{Role.HINT}"]:disabled {{
+    color: {rgb(theme.text_disabled)};
 }}
 QLabel[{ROLE_PROPERTY}="{Role.ERROR}"] {{
     color: {rgb(theme.danger)};

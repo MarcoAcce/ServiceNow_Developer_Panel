@@ -1,12 +1,13 @@
-from PySide6.QtCore import Qt
+from enum import StrEnum
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFormLayout,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -30,14 +31,15 @@ from core.table_description import (
 )
 from core.table_dictionary import ACTIVE_FIELD, ELEMENT_FIELD, REFERENCE_FIELD, TYPE_FIELD
 from response_tabs.response_tab import TABLE_NAME_LIMIT, RecordsResponseTab
-from ui.dialogs import CLOSE_LABEL, FramelessDialog
+from ui.dialogs import CLOSE_LABEL, FramelessDialog, show_error
 from ui.ui_widgets import (
     hint_label,
+    horizontal_rule,
     primary_button,
-    section_label,
     shorten_text,
+    title_label,
 )
-from ui.widgets.record_grid import configure_record_grid, fit_columns
+from ui.widgets.detail_rows import ChoiceDetail, CodeDetail, InlineDetail
 from ui.widgets.relations_graph import RelationsGraph
 
 FIELD_COLUMNS: tuple[str, ...] = (
@@ -77,26 +79,48 @@ RELATIONS_HINT: str = (
 RELATIONS_MAXIMUM_WIDTH: int = 1180
 RELATIONS_MAXIMUM_HEIGHT: int = 640
 RELATIONS_EXTRA: int = 24
+SAVE_IMAGE_LABEL: str = "Save as image"
+SAVE_TEXT_LABEL: str = "Save as text"
+SAVE_IMAGE_TITLE: str = "Save the relations as an image"
+SAVE_TEXT_TITLE: str = "Save the relations as text"
+IMAGE_FILTER: str = "PNG images (*.png)"
+TEXT_FILTER: str = "Text files (*.txt)"
+IMAGE_SUFFIX: str = ".png"
+TEXT_SUFFIX: str = ".txt"
+IMAGE_FORMAT: str = "PNG"
+RELATIONS_FILE_NAME: str = "{table}_relations{suffix}"
+SAVE_ERROR_TITLE: str = "Save failed"
+IMAGE_ERROR_MESSAGE: str = "The image could not be written to {path}."
 DETAILS_SECTION: str = "Field details"
-DETAILS_HEIGHT: int = 230
-DETAILS_SPACING: int = 12
-EMPTY_DETAILS: str = "Select a field to read its details."
-CHOICES_SECTION: str = "Choice list"
-NO_CHOICES: str = "This field has no choice list."
-CHOICE_COLUMNS: tuple[str, ...] = ("Value", "Label", "Dependent value")
+DETAILS_TITLE_DELTA: int = 2
+DETAILS_HEIGHT: int = 300
+DETAILS_SPACING: int = 10
+EMPTY_DETAILS: str = "Select a field in the list above to read its details."
+CHOICES_TITLE: str = "Choice list"
+DESCRIBE_LABEL: str = "Describe this table"
+DESCRIBE_TOOLTIP: str = "Open a new describe table request for {table} and run it"
 OVERRIDE_TEXT: str = "{attribute} = {value} on {table}"
-DETAIL_ROWS: tuple[tuple[str, str], ...] = (
-    ("label", "Label"),
-    ("type", "Type"),
-    ("reference", "Reference to"),
-    ("defined_on", "Defined on"),
-    ("max_length", "Max length"),
-    ("default_value", "Default value"),
-    ("dependent", "Dependent on"),
-    ("qualifier_type", "Qualifier type"),
-    ("qualifier", "Reference qualifier"),
-    ("attributes", "Attributes"),
-    ("overrides", "Overrides"),
+REFERENCE_KEY: str = "reference"
+
+
+class DetailKind(StrEnum):
+    TEXT = "text"
+    COPYABLE = "copyable"
+    CODE = "code"
+
+
+DETAIL_ROWS: tuple[tuple[str, str, DetailKind], ...] = (
+    ("label", "Label", DetailKind.COPYABLE),
+    ("type", "Type", DetailKind.TEXT),
+    (REFERENCE_KEY, "Reference to", DetailKind.COPYABLE),
+    ("defined_on", "Defined on", DetailKind.COPYABLE),
+    ("max_length", "Max length", DetailKind.TEXT),
+    ("dependent", "Dependent on", DetailKind.COPYABLE),
+    ("default_value", "Default value", DetailKind.CODE),
+    ("qualifier_type", "Qualifier type", DetailKind.TEXT),
+    ("qualifier", "Reference qualifier", DetailKind.CODE),
+    ("attributes", "Attributes", DetailKind.CODE),
+    ("overrides", "Overrides", DetailKind.CODE),
 )
 
 
@@ -132,37 +156,89 @@ def detail_values(field: DescribedField) -> dict[str, str]:
     }
 
 
+def save_path(parent: QWidget, title: str, name: str, filter_text: str, suffix: str) -> str:
+    path, _ = QFileDialog.getSaveFileName(parent, title, name, filter_text)
+    if path and not path.lower().endswith(suffix):
+        path = f"{path}{suffix}"
+    return path
+
+
+def choice_rows(field: DescribedField) -> list[tuple[str, str, str]]:
+    return [
+        (choice["value"], choice["label"], choice.get("dependent_value", ""))
+        for choice in field.description.get("choices", [])
+    ]
+
+
 class RelationsDialog(FramelessDialog):
 
     def __init__(self, result: RequestResult, parent: QWidget | None = None) -> None:
         super().__init__(RELATIONS_TITLE.format(table=result.table), parent)
-        graph = RelationsGraph(result.table, relations(result, described_fields(result)))
+        self._table: str = result.table
+        self.graph: RelationsGraph = RelationsGraph(
+            result.table, relations(result, described_fields(result))
+        )
         scroll = QScrollArea()
-        scroll.setWidget(graph)
+        scroll.setWidget(self.graph)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        size = graph.sizeHint()
+        size = self.graph.sizeHint()
         scroll.setMinimumSize(
             min(size.width() + RELATIONS_EXTRA, RELATIONS_MAXIMUM_WIDTH),
             min(size.height() + RELATIONS_EXTRA, RELATIONS_MAXIMUM_HEIGHT),
         )
         self.content_layout.addWidget(hint_label(RELATIONS_HINT))
         self.content_layout.addWidget(scroll, 1)
+        image_button = QPushButton(SAVE_IMAGE_LABEL)
+        image_button.clicked.connect(self._save_image)
+        text_button = QPushButton(SAVE_TEXT_LABEL)
+        text_button.clicked.connect(self._save_text)
         close_button = primary_button(CLOSE_LABEL)
         close_button.setDefault(True)
         close_button.clicked.connect(self.accept)
-        self.add_button_row(close_button)
+        self.add_button_row(image_button, text_button, close_button)
+
+    def _file_name(self, suffix: str) -> str:
+        return RELATIONS_FILE_NAME.format(table=self._table, suffix=suffix)
+
+    def _save_image(self) -> None:
+        path = save_path(
+            self, SAVE_IMAGE_TITLE, self._file_name(IMAGE_SUFFIX), IMAGE_FILTER, IMAGE_SUFFIX
+        )
+        if not path:
+            return
+        if not self.graph.to_image().save(path, IMAGE_FORMAT):
+            show_error(self, SAVE_ERROR_TITLE, IMAGE_ERROR_MESSAGE.format(path=path))
+            return
+        self.accept()
+
+    def _save_text(self) -> None:
+        path = save_path(
+            self, SAVE_TEXT_TITLE, self._file_name(TEXT_SUFFIX), TEXT_FILTER, TEXT_SUFFIX
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.graph.text, encoding="utf-8")
+        except OSError as error:
+            show_error(self, SAVE_ERROR_TITLE, str(error))
+            return
+        self.accept()
 
 
 class TableDescriptionResponseTab(RecordsResponseTab):
 
+    describeRequested = Signal(str)
+
     def __init__(self, result: RequestResult) -> None:
         self._fields: list[DescribedField] = []
+        self._reference: str = ""
         self.relations_button: QPushButton = QPushButton(RELATIONS_LABEL)
-        self.details_form: QFormLayout = QFormLayout()
-        self.details_values: dict[str, QLabel] = {}
+        self.details_section: QWidget = QWidget()
+        self.details_scroll: QScrollArea = QScrollArea()
         self.empty_details_label: QLabel = hint_label(EMPTY_DETAILS)
-        self.choices_widget: QTableWidget = QTableWidget()
-        self.no_choices_label: QLabel = hint_label(NO_CHOICES)
+        self.details: dict[str, InlineDetail | CodeDetail] = {}
+        self.choices_detail: ChoiceDetail = ChoiceDetail(CHOICES_TITLE)
+        self.describe_button: QPushButton = QPushButton(DESCRIBE_LABEL)
         super().__init__(result)
 
     def build_menu_table(self, result: RequestResult) -> str:
@@ -195,15 +271,19 @@ class TableDescriptionResponseTab(RecordsResponseTab):
         toolbar.addWidget(self.relations_button)
 
     def build_details(self, layout: QVBoxLayout) -> None:
-        layout.addWidget(section_label(DETAILS_SECTION))
-        details = QWidget()
-        details.setFixedHeight(DETAILS_HEIGHT)
-        row = QHBoxLayout(details)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(DETAILS_SPACING)
-        row.addWidget(self._build_form(), 1)
-        row.addWidget(self._build_choices(), 1)
-        layout.addWidget(details)
+        layout.addWidget(horizontal_rule())
+        self.details_section.setFixedHeight(DETAILS_HEIGHT)
+        section = QVBoxLayout(self.details_section)
+        section.setContentsMargins(0, 0, 0, 0)
+        section.addWidget(title_label(DETAILS_SECTION, DETAILS_TITLE_DELTA))
+        self.details_scroll.setWidgetResizable(True)
+        self.details_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.details_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.details_scroll.setWidget(self._build_detail_rows())
+        section.addWidget(self.details_scroll, 1)
+        layout.addWidget(self.details_section)
 
     def on_row_selected(self, record: dict[str, str]) -> None:
         element = record.get(ELEMENT_FIELD, "")
@@ -212,53 +292,46 @@ class TableDescriptionResponseTab(RecordsResponseTab):
                 self._show_field(field)
                 return
 
-    def _build_form(self) -> QScrollArea:
-        form = QWidget()
-        form.setLayout(self.details_form)
-        self.details_form.setContentsMargins(0, 0, 0, 0)
-        self.details_form.addRow(self.empty_details_label)
-        for key, label in DETAIL_ROWS:
-            value = QLabel()
-            value.setWordWrap(True)
-            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.details_values[key] = value
-            self.details_form.addRow(label, value)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(form)
-        return scroll
+    def on_selection_cleared(self) -> None:
+        self._show_field(None)
 
-    def _build_choices(self) -> QWidget:
-        choices = QWidget()
-        layout = QVBoxLayout(choices)
+    def _build_detail_rows(self) -> QWidget:
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(section_label(CHOICES_SECTION))
-        self.no_choices_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self.no_choices_label, 1)
-        layout.addWidget(self.choices_widget, 1)
-        configure_record_grid(self.choices_widget)
-        self.choices_widget.setColumnCount(len(CHOICE_COLUMNS))
-        self.choices_widget.setHorizontalHeaderLabels(list(CHOICE_COLUMNS))
-        return choices
+        layout.setSpacing(DETAILS_SPACING)
+        layout.addWidget(self.empty_details_label)
+        for key, title, kind in DETAIL_ROWS:
+            detail = self._build_detail(title, kind)
+            self.details[key] = detail
+            layout.addWidget(detail)
+        layout.addWidget(self.choices_detail)
+        layout.addStretch(1)
+        reference = self.details[REFERENCE_KEY]
+        if isinstance(reference, InlineDetail):
+            self.describe_button.clicked.connect(self._on_describe_clicked)
+            reference.add_action(self.describe_button)
+        return content
+
+    def _build_detail(self, title: str, kind: DetailKind) -> InlineDetail | CodeDetail:
+        if kind is DetailKind.CODE:
+            return CodeDetail(title)
+        return InlineDetail(title, copyable=kind is DetailKind.COPYABLE)
 
     def _show_field(self, field: DescribedField | None) -> None:
-        self.details_form.setRowVisible(self.empty_details_label, field is None)
+        self.details_section.setEnabled(field is not None)
+        self.empty_details_label.setVisible(field is None)
         values = detail_values(field) if field is not None else {}
-        for key, label in self.details_values.items():
-            text = values.get(key, "")
-            label.setText(text)
-            self.details_form.setRowVisible(label, bool(text))
-        choices = field.description.get("choices", []) if field is not None else []
-        self.choices_widget.setVisible(bool(choices))
-        self.no_choices_label.setVisible(not choices)
-        self.no_choices_label.setText(NO_CHOICES if field is not None else "")
-        self.choices_widget.setRowCount(len(choices))
-        for row, choice in enumerate(choices):
-            cells = (choice["value"], choice["label"], choice.get("dependent_value", ""))
-            for column, text in enumerate(cells):
-                self.choices_widget.setItem(row, column, QTableWidgetItem(text))
-        fit_columns(self.choices_widget)
+        for key, detail in self.details.items():
+            detail.set_value(values.get(key, ""))
+        self._reference = values.get(REFERENCE_KEY, "")
+        self.describe_button.setToolTip(DESCRIBE_TOOLTIP.format(table=self._reference))
+        self.choices_detail.set_choices(choice_rows(field) if field is not None else [])
+        self.details_scroll.verticalScrollBar().setValue(0)
+
+    def _on_describe_clicked(self) -> None:
+        if self._reference:
+            self.describeRequested.emit(self._reference)
 
     def _show_relations(self) -> None:
         dialog = RelationsDialog(self.result, self)

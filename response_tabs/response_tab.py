@@ -295,6 +295,9 @@ class RecordsResponseTab(ResponseTab):
     def on_row_selected(self, record: dict[str, str]) -> None:
         return None
 
+    def on_selection_cleared(self) -> None:
+        return None
+
     def build_summary_rows(self, layout: QFormLayout) -> None:
         super().build_summary_rows(layout)
         layout.addRow("Endpoint", self.endpoint_label)
@@ -484,8 +487,10 @@ class RecordsResponseTab(ResponseTab):
 
     def _on_selection_changed(self) -> None:
         record = self._selected_record()
-        if record is not None:
-            self.on_row_selected(record)
+        if record is None:
+            self.on_selection_cleared()
+            return
+        self.on_row_selected(record)
 
     def _save_as_csv(self) -> None:
         suggestion = f"{self.result.table or self.result.request_type.key}.csv"

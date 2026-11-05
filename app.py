@@ -45,14 +45,17 @@ from configuration.config_tab import ConfigTab
 from core.database_manager import DatabaseError, DatabaseManager
 from ui.home_tab import HomeTab
 
-from core.request_types import RequestType
+from core.request_types import TABLE_DESCRIPTION, RequestType
+from core.table_description import active_only
 from storage.request_hints import RequestHintRepository
 from request_tabs.request_tab import RequestTab
+from request_tabs.table_description_request_tab import TableDescriptionRequestTab
 from request_tabs.table_request_tabs import create_request_tab
 
 from response_tabs.response_context import ResponseContext
 from storage.response_repository import ResponseRepository
 from response_tabs.response_tab import ResponseTab
+from response_tabs.table_description_response_tab import TableDescriptionResponseTab
 
 from services.service import RequestCall, RequestError, RequestResult, RequestService
 from services.cached_service import CachedRequestService
@@ -149,7 +152,7 @@ class MainWindow(FramelessWindow):
         self.sidebar.add_config_page(self.config_tab)
         self.sidebar.select_page(self.home_tab)
 
-    def open_new_request_page(self, request_type: RequestType) -> None:
+    def open_new_request_page(self, request_type: RequestType) -> RequestTab:
         self._discard_request_page()
         request_page = create_request_tab(
             request_type.key, self.service, self.repository, self.hints
@@ -160,6 +163,16 @@ class MainWindow(FramelessWindow):
         request_page.runningChanged.connect(self._set_busy)
         self._request_page = request_page
         self._display(request_page)
+        return request_page
+
+    def describe_table(self, source: TableDescriptionResponseTab, table: str) -> None:
+        request_page = self.open_new_request_page(TABLE_DESCRIPTION)
+        instance = source.result.target.instance
+        if instance is not None:
+            request_page.set_instance_id(instance.id)
+        if isinstance(request_page, TableDescriptionRequestTab):
+            request_page.prefill(table, active_only(source.result))
+        request_page.execute()
 
     def close_request_page(self) -> None:
         self._discard_request_page()
@@ -170,6 +183,10 @@ class MainWindow(FramelessWindow):
         page.refreshRequested.connect(self.refresh_response_page)
         page.runningChanged.connect(self._set_busy)
         page.set_refresh_enabled(not self._busy)
+        if isinstance(page, TableDescriptionResponseTab):
+            page.describeRequested.connect(
+                lambda table, source=page: self.describe_table(source, table)
+            )
         self.response_tabs.append(page)
         self.sidebar.add_response_page(page)
         self.sidebar.select_page(page)
@@ -319,9 +336,8 @@ class PanelCore(QObject):
                 window.setWindowState(Qt.WindowState.WindowMaximized)
         self._idle_timer.stop()
         if window.isMinimized():
-            window.showNormal()
-        else:
-            window.show()
+            window.setWindowState(window.windowState() & ~Qt.WindowState.WindowMinimized)
+        window.show()
         window.raise_()
         window.activateWindow()
 

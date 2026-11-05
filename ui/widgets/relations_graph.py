@@ -6,9 +6,11 @@ from PySide6.QtGui import (
     QFont,
     QFontMetrics,
     QHelpEvent,
+    QImage,
     QPainter,
     QPen,
     QPolygonF,
+    QRegion,
 )
 from PySide6.QtWidgets import QToolTip, QWidget
 
@@ -61,6 +63,10 @@ LEGEND_KINDS: tuple[RelationKind, ...] = (
     RelationKind.PARENT,
 )
 HIERARCHY_KINDS: tuple[RelationKind, ...] = (RelationKind.PARENT, RelationKind.CHILD)
+TEXT_TITLE: str = "Relations of {table}"
+TEXT_ITEM: str = "- {text}"
+CARDINALITY_TEXT: str = "cardinality {value}"
+IMAGE_SCALE: int = 2
 CENTER_FLAGS: int = int(Qt.AlignmentFlag.AlignCenter)
 LEFT_FLAGS: int = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -98,6 +104,37 @@ def relation_subtitle(relation: Relation) -> str:
     if not relation.via:
         return label
     return TEXT_SEPARATOR.join((label, VIA_TEXT.format(names=VIA_SEPARATOR.join(relation.via))))
+
+
+def relation_line(relation: Relation) -> str:
+    parts = (
+        relation.table,
+        relation_subtitle(relation),
+        CARDINALITY_TEXT.format(value=cardinality(relation)),
+    )
+    return TEXT_ITEM.format(text=TEXT_SEPARATOR.join(parts))
+
+
+def relations_text(table: str, relations: Sequence[Relation]) -> str:
+    parents = [relation for relation in relations if relation.kind is RelationKind.PARENT]
+    children = [relation for relation in relations if relation.kind is RelationKind.CHILD]
+    linked = [relation for relation in relations if relation.kind not in HIERARCHY_KINDS]
+    incoming = [relation for relation in linked if not relation.outgoing]
+    outgoing = [relation for relation in linked if relation.outgoing]
+    hierarchy = (
+        [(relation.table, PARENT_SUBTITLE) for relation in reversed(parents)]
+        + [(table, CENTER_SUBTITLE)]
+        + [(relation.table, CHILD_SUBTITLE.format(table=table)) for relation in children]
+    )
+    lines = [TEXT_TITLE.format(table=table), "", CENTER_TITLE]
+    lines.extend(
+        TEXT_ITEM.format(text=TEXT_SEPARATOR.join(entry)) for entry in hierarchy
+    )
+    lines.extend(["", LEFT_TITLE.format(count=len(incoming))])
+    lines.extend(relation_line(relation) for relation in incoming)
+    lines.extend(["", RIGHT_TITLE.format(count=len(outgoing))])
+    lines.extend(relation_line(relation) for relation in outgoing)
+    return "\n".join(lines) + "\n"
 
 
 def edge_pen(kind: RelationKind, theme: Theme) -> QPen:
@@ -218,6 +255,18 @@ class RelationsGraph(QWidget):
 
     def sizeHint(self) -> QSize:
         return self._layout.size
+
+    def to_image(self) -> QImage:
+        size = self._layout.size
+        image = QImage(size * IMAGE_SCALE, QImage.Format.Format_ARGB32)
+        image.setDevicePixelRatio(IMAGE_SCALE)
+        image.fill(color_of(current_theme().canvas))
+        self.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+        return image
+
+    @property
+    def text(self) -> str:
+        return relations_text(self._table, self._relations)
 
     def minimumSizeHint(self) -> QSize:
         return self._layout.size

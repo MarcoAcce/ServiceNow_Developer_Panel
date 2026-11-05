@@ -16,6 +16,7 @@ WARNING_ICON: str = "warning"
 EXPAND_ICON: str = "expand"
 COLLAPSE_ICON: str = "collapse"
 INFO_ICON: str = "info"
+COPY_ICON: str = "copy"
 
 ICON_PATHS: dict[str, str] = {
     HOME_ICON: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
@@ -47,6 +48,10 @@ ICON_PATHS: dict[str, str] = {
     ),
     EXPAND_ICON: "M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z",
     COLLAPSE_ICON: "M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z",
+    COPY_ICON: (
+        "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1"
+        " 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+    ),
     INFO_ICON: (
         "M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S1"
         "7.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
