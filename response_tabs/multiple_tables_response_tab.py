@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -30,7 +29,7 @@ from services.service import (
     ResultSection,
     section_of,
 )
-from ui.widgets.record_grid import configure_record_grid, reset_columns
+from ui.widgets.record_grid import configure_record_grid, fit_columns, reset_columns
 from ui.widgets.table_query_form import (
     ADD_TABLE_LABEL,
     TableQueryDialog,
@@ -40,7 +39,6 @@ from ui.widgets.table_query_form import (
     order_of,
 )
 from ui.ui_widgets import (
-    configure_table,
     hint_label,
     horizontal_rule,
     primary_button,
@@ -210,16 +208,10 @@ class MultipleTablesResponseTab(ResponseTab):
         return footer
 
     def _configure_tables(self) -> None:
-        configure_table(self.tables_widget)
+        configure_record_grid(self.tables_widget)
         self.tables_widget.setColumnCount(2)
         self.tables_widget.setHorizontalHeaderLabels([TABLE_COLUMN, RECORDS_COLUMN])
-        header = self.tables_widget.horizontalHeader()
-        header.setSectionResizeMode(TABLE_COLUMN_INDEX, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(
-            COUNT_COLUMN_INDEX, QHeaderView.ResizeMode.ResizeToContents
-        )
         self.tables_widget.itemClicked.connect(self._on_table_clicked)
-        configure_table(self.result_widget)
         configure_record_grid(self.result_widget)
 
     def _build_pages(self) -> None:
@@ -267,6 +259,7 @@ class MultipleTablesResponseTab(ResponseTab):
             )
             self.tables_widget.setItem(row, TABLE_COLUMN_INDEX, name_item)
             self.tables_widget.setItem(row, COUNT_COLUMN_INDEX, count_item)
+        fit_columns(self.tables_widget)
         self._resize_tables()
 
     def _resize_tables(self) -> None:

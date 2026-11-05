@@ -3,7 +3,6 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -26,12 +25,12 @@ from core.acl.acl_verification import (
     evaluate,
 )
 from ui.widgets.flow_graph import FlowGraph
+from ui.widgets.record_grid import configure_record_grid, fit_columns
 from response_tabs.response_tab import DETAIL_SEPARATOR, TABLE_NAME_LIMIT, ResponseTab
 from services.service import RequestResult
 from ui.theme import Role, refresh_role, set_role
 from ui.ui_widgets import (
     check_item,
-    configure_table,
     hint_label,
     horizontal_rule,
     script_view,
@@ -82,7 +81,6 @@ COLUMN_LABELS: tuple[str, ...] = (
     "Script",
     "Roles match",
 )
-ROLES_COLUMN_INDEX: int = 3
 CHECK_COLUMN_INDEXES: tuple[int, ...] = (4, 5, 6, 7)
 
 
@@ -184,12 +182,9 @@ class VerifySecurityResponseTab(ResponseTab):
         layout.addWidget(section_label(PROFILES_SECTION))
         layout.addWidget(hint_label(PROFILES_HINT))
         layout.addWidget(self.profiles_widget)
-        configure_table(self.profiles_widget)
+        configure_record_grid(self.profiles_widget)
         self.profiles_widget.setColumnCount(len(PROFILE_COLUMN_LABELS))
         self.profiles_widget.setHorizontalHeaderLabels(list(PROFILE_COLUMN_LABELS))
-        header = self.profiles_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.profiles_widget.itemSelectionChanged.connect(self._on_profile_selected)
         return self.profiles_box
 
@@ -229,12 +224,9 @@ class VerifySecurityResponseTab(ResponseTab):
         self.graph_area.setFixedHeight(min(height, GRAPH_HEIGHT))
 
     def _configure_controls(self) -> None:
-        configure_table(self.controls_widget)
+        configure_record_grid(self.controls_widget)
         self.controls_widget.setColumnCount(len(COLUMN_LABELS))
         self.controls_widget.setHorizontalHeaderLabels(list(COLUMN_LABELS))
-        header = self.controls_widget.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(ROLES_COLUMN_INDEX, QHeaderView.ResizeMode.Stretch)
         self.controls_widget.itemSelectionChanged.connect(self._on_control_selected)
 
     def _fill_profiles(self) -> None:
@@ -248,6 +240,7 @@ class VerifySecurityResponseTab(ResponseTab):
             self.profiles_widget.setItem(row, 1, row_item(profile.decision_label, row))
         self.profiles_widget.selectRow(0)
         self.profiles_widget.blockSignals(False)
+        fit_columns(self.profiles_widget)
         resize_table(self.profiles_widget, PROFILES_HEIGHT)
 
     def _select_profile(self, index: int) -> None:
@@ -301,7 +294,7 @@ class VerifySecurityResponseTab(ResponseTab):
                 item = check_item(checked)
                 item.setData(Qt.ItemDataRole.UserRole, row)
                 self.controls_widget.setItem(row, column, item)
-        self.controls_widget.resizeColumnsToContents()
+        fit_columns(self.controls_widget)
         self.controls_widget.blockSignals(False)
         resize_table(self.controls_widget, CONTROLS_HEIGHT)
 

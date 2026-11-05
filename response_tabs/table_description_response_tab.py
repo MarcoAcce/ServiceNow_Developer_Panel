@@ -2,7 +2,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -33,12 +32,12 @@ from core.table_dictionary import ACTIVE_FIELD, ELEMENT_FIELD, REFERENCE_FIELD, 
 from response_tabs.response_tab import TABLE_NAME_LIMIT, RecordsResponseTab
 from ui.dialogs import CLOSE_LABEL, FramelessDialog
 from ui.ui_widgets import (
-    configure_table,
     hint_label,
     primary_button,
     section_label,
     shorten_text,
 )
+from ui.widgets.record_grid import configure_record_grid, fit_columns
 from ui.widgets.relations_graph import RelationsGraph
 
 FIELD_COLUMNS: tuple[str, ...] = (
@@ -238,13 +237,9 @@ class TableDescriptionResponseTab(RecordsResponseTab):
         self.no_choices_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self.no_choices_label, 1)
         layout.addWidget(self.choices_widget, 1)
-        configure_table(self.choices_widget)
+        configure_record_grid(self.choices_widget)
         self.choices_widget.setColumnCount(len(CHOICE_COLUMNS))
         self.choices_widget.setHorizontalHeaderLabels(list(CHOICE_COLUMNS))
-        self.choices_widget.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.choices_widget.horizontalHeader().setStretchLastSection(True)
         return choices
 
     def _show_field(self, field: DescribedField | None) -> None:
@@ -263,6 +258,7 @@ class TableDescriptionResponseTab(RecordsResponseTab):
             cells = (choice["value"], choice["label"], choice.get("dependent_value", ""))
             for column, text in enumerate(cells):
                 self.choices_widget.setItem(row, column, QTableWidgetItem(text))
+        fit_columns(self.choices_widget)
 
     def _show_relations(self) -> None:
         dialog = RelationsDialog(self.result, self)

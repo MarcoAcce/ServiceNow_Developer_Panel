@@ -2,7 +2,6 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -315,14 +314,8 @@ class RecordsResponseTab(ResponseTab):
         layout.addWidget(self._build_pager())
         self.build_details(layout)
 
-        self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table_widget.setAlternatingRowColors(True)
-        self.table_widget.setSortingEnabled(False)
-        self.table_widget.verticalHeader().setVisible(False)
-        self.table_widget.itemSelectionChanged.connect(self._on_selection_changed)
         configure_record_grid(self.table_widget)
+        self.table_widget.itemSelectionChanged.connect(self._on_selection_changed)
         header = self.table_widget.horizontalHeader()
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._on_section_clicked)
