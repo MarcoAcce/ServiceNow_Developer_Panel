@@ -1,8 +1,8 @@
 # Building and installing
 
-These instructions are for the standalone executable: a packaged copy of the application that runs without Python, either installed by the setup or built yourself. 
+These instructions are for the standalone executable: a packaged copy of the application that runs without Python, either installed by the setup or built yourself (see [Building from source](#run-from-source)). 
 
-If you're comfortable with Python you can simply ignore them and run the application. See [Run from source](#run-from-source).
+If you're comfortable with Python you can simply ignore them and run the application (see [Running from source](#running-from-source)).
 
 ## Windows SmartScreen warning
 
@@ -41,7 +41,7 @@ The application installs per user, without administrator rights:
 - Windows: `%LOCALAPPDATA%\Programs\ServiceNowDeveloperPanel`
 - Linux: `~/.local/opt/ServiceNowDeveloperPanel`
 
-## Run from source
+## Running from source
 
 Install Python 3.14 and the packages in `requirements.txt` (for example in a virtual environemnt ass in [Building from source](#building-from-source)), then start the application from the project root:
 

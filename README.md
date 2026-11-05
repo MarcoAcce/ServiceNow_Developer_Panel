@@ -48,4 +48,4 @@ This project is written entirely in Python.
 I used `Pyside6` for the UI and the `mcp` package for the MCP server.
 The list of packages needed to build this application is in the `requirement.txt` file.
 
-You can build the app or its installer yourself. See [Building and installing](docs/build.md).
+You can build the app or run it from its source yourself. See [Building and installing](docs/build.md) for details.
