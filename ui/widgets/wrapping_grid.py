@@ -1,3 +1,4 @@
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QGridLayout, QWidget
 
@@ -15,6 +16,7 @@ class WrappingGrid(QWidget):
         self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setHorizontalSpacing(GRID_SPACING)
         self._grid.setVerticalSpacing(GRID_SPACING)
+        self._grid.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
     def add_widget(self, widget: QWidget) -> None:
         self._items.append(widget)

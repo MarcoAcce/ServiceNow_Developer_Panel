@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -25,6 +24,7 @@ from services.service import RequestResult
 from ui.tab import Tab
 from ui.theme import Role, set_role
 from storage.table_export import write_csv
+from ui.widgets.record_grid import configure_record_grid, reset_columns
 from ui.ui_widgets import (
     check_item,
     hint_label,
@@ -322,6 +322,7 @@ class RecordsResponseTab(ResponseTab):
         self.table_widget.setSortingEnabled(False)
         self.table_widget.verticalHeader().setVisible(False)
         self.table_widget.itemSelectionChanged.connect(self._on_selection_changed)
+        configure_record_grid(self.table_widget)
         header = self.table_widget.horizontalHeader()
         header.setSectionsClickable(True)
         header.sectionClicked.connect(self._on_section_clicked)
@@ -354,7 +355,9 @@ class RecordsResponseTab(ResponseTab):
         return self.pager
 
     def _fill_table(self) -> None:
-        self._columns = self.columns()
+        columns = self.columns()
+        changed = columns != self._columns
+        self._columns = columns
         self._checkboxes = self.checkbox_columns()
         self._sort_column = -1
         self._sort_order = Qt.SortOrder.AscendingOrder
@@ -363,11 +366,10 @@ class RecordsResponseTab(ResponseTab):
         self.table_widget.setHorizontalHeaderLabels(
             [self.column_label(column) for column in self._columns]
         )
-        header = self.table_widget.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        header.setSortIndicatorShown(False)
+        self.table_widget.horizontalHeader().setSortIndicatorShown(False)
         self._apply_filter(self.filter_field.text())
+        if changed:
+            reset_columns(self.table_widget)
 
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
@@ -408,7 +410,6 @@ class RecordsResponseTab(ResponseTab):
                 item = self._cell_item(column, record)
                 item.setData(Qt.ItemDataRole.UserRole, index)
                 self.table_widget.setItem(row, column_index, item)
-        self.table_widget.resizeColumnsToContents()
         self._update_pager()
         self._update_record_count()
 

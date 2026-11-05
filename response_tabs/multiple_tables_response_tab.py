@@ -30,6 +30,7 @@ from services.service import (
     ResultSection,
     section_of,
 )
+from ui.widgets.record_grid import configure_record_grid, reset_columns
 from ui.widgets.table_query_form import (
     ADD_TABLE_LABEL,
     TableQueryDialog,
@@ -219,6 +220,7 @@ class MultipleTablesResponseTab(ResponseTab):
         )
         self.tables_widget.itemClicked.connect(self._on_table_clicked)
         configure_table(self.result_widget)
+        configure_record_grid(self.result_widget)
 
     def _build_pages(self) -> None:
         self.pages.addWidget(self._build_editor_page())
@@ -342,7 +344,7 @@ class MultipleTablesResponseTab(ResponseTab):
         for row, values in enumerate(outcome.rows):
             for column, value in enumerate(values):
                 self.result_widget.setItem(row, column, QTableWidgetItem(value))
-        self.result_widget.resizeColumnsToContents()
+        reset_columns(self.result_widget)
         self.result_label.setText(outcome_message(outcome))
 
     def _requested_tables(self) -> tuple[str, ...]:
