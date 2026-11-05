@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
@@ -110,8 +110,10 @@ class MultipleTablesRequestTab(RequestTab):
         self._rows: list[TableRequestRow] = []
         self._rows_layout: QVBoxLayout = QVBoxLayout()
         self.add_button: QPushButton = QPushButton(ADD_TABLE_LABEL)
+        self._scroll: QScrollArea = QScrollArea()
         super().__init__(MULTIPLE_TABLES, service, repository, hints)
         self._add_row()
+        self._rows[0].focus_table()
 
     def parts(self) -> tuple[RequestPart, ...]:
         parts = [row.part() for row in self._rows]
@@ -158,11 +160,10 @@ class MultipleTablesRequestTab(RequestTab):
         layout.addLayout(self._rows_layout)
         layout.addWidget(vertical_spacer())
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(content)
-        return scroll
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setWidget(content)
+        return self._scroll
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -182,10 +183,20 @@ class MultipleTablesRequestTab(RequestTab):
         self._rows.append(row)
         self._rows_layout.addWidget(row)
         self.refresh_state()
-        row.focus_table()
 
     def _on_add_clicked(self) -> None:
         self._add_row()
+        QTimer.singleShot(0, self._focus_last_row)
+
+    def _focus_last_row(self) -> None:
+        if not self._rows:
+            return
+        row = self._rows[-1]
+        content = self._scroll.widget()
+        if content is not None and content.layout() is not None:
+            content.layout().activate()
+        self._scroll.ensureWidgetVisible(row)
+        row.focus_table()
 
     def _expand(self, target: TableRequestRow) -> None:
         for row in self._rows:
