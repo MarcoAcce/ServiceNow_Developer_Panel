@@ -4,8 +4,8 @@ import sys
 import time
 from functools import partial
 
-from PySide6.QtCore import QLockFile, QObject, Qt, QThreadPool, QTimer
-from PySide6.QtGui import QCloseEvent, QIcon
+from PySide6.QtCore import QLockFile, QObject, QSize, Qt, QThreadPool, QTimer
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -36,7 +36,11 @@ from ui.dialogs import ErrorDialog
 from ui.icons import refresh_icon_widgets
 from ui.sidebar import Sidebar
 from ui.tab import Tab
-from configuration.config_repository import ConfigRepository
+from configuration.config_repository import (
+    MINIMUM_WINDOW_HEIGHT,
+    MINIMUM_WINDOW_WIDTH,
+    ConfigRepository,
+)
 from configuration.config_tab import ConfigTab
 from core.database_manager import DatabaseError, DatabaseManager
 from ui.home_tab import HomeTab
@@ -60,8 +64,6 @@ from ui.window_frame import FramelessWindow
 
 APPLICATION_NAME: str = "ServiceNow Developer Panel"
 WINDOW_TITLE: str = "ServiceNow Developer Panel"
-WINDOW_WIDTH: int = 1280
-WINDOW_HEIGHT: int = 820
 TASK_SHUTDOWN_TIMEOUT_MS: int = 15000
 IDLE_GRACE_PERIOD_MS: int = IDLE_GRACE_PERIOD_SECONDS * 1000
 USE_DUMMY_SERVICE: bool = False
@@ -87,9 +89,9 @@ class MainWindow(FramelessWindow):
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
         self.setWindowIcon(QIcon(str(icon_path())))
-        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.apply_window_theme(theme)
         self.repository: ConfigRepository = repository
+        self._apply_start_size()
         self.hints: RequestHintRepository = RequestHintRepository(database)
         self.responses: ResponseRepository = ResponseRepository(database)
         self.service: RequestService = CachedRequestService(
@@ -108,6 +110,21 @@ class MainWindow(FramelessWindow):
         self._refresh_call: RequestCall | None = None
         self._refresh_page: ResponseTab | None = None
         self._build_ui()
+
+    def _apply_start_size(self) -> None:
+        available = self._available_size()
+        self.setMinimumSize(
+            min(MINIMUM_WINDOW_WIDTH, available.width()),
+            min(MINIMUM_WINDOW_HEIGHT, available.height()),
+        )
+        width, height = self.repository.window_size()
+        self.resize(min(width, available.width()), min(height, available.height()))
+
+    def _available_size(self) -> QSize:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return QSize(MINIMUM_WINDOW_WIDTH, MINIMUM_WINDOW_HEIGHT)
+        return screen.availableGeometry().size()
 
     def _build_ui(self) -> None:
         self._content: QWidget = QWidget()
@@ -298,6 +315,8 @@ class PanelCore(QObject):
             window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
             window.destroyed.connect(self._on_window_destroyed)
             self._window = window
+            if self._repository.start_maximized():
+                window.setWindowState(Qt.WindowState.WindowMaximized)
         self._idle_timer.stop()
         if window.isMinimized():
             window.showNormal()

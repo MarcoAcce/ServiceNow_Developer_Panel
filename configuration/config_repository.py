@@ -43,6 +43,17 @@ AUTHENTICATION_ACTIVATE: str = (
 AUTHENTICATION_DEACTIVATE: str = (
     "UPDATE {table} SET active = 0 WHERE instance_id = ? AND active = 1"
 )
+START_MAXIMIZED_SETTING: str = "start_maximized"
+WINDOW_WIDTH_SETTING: str = "window_width"
+WINDOW_HEIGHT_SETTING: str = "window_height"
+DEFAULT_START_MAXIMIZED: bool = True
+DEFAULT_WINDOW_WIDTH: int = 1280
+DEFAULT_WINDOW_HEIGHT: int = 720
+MINIMUM_WINDOW_WIDTH: int = 1200
+MINIMUM_WINDOW_HEIGHT: int = 700
+MAXIMUM_WINDOW_SIZE: int = 10000
+TRUE_SETTING: str = "1"
+FALSE_SETTING: str = "0"
 CONFIGURATION_QUERY: str = "SELECT value FROM local_configuration WHERE name = ?"
 CONFIGURATION_UPSERT: str = (
     "INSERT INTO local_configuration (name, value) VALUES (?, ?) "
@@ -144,6 +155,39 @@ class ConfigRepository:
 
     def set_suggestion_count(self, count: int) -> None:
         self.set_configuration_value(SUGGESTION_COUNT_SETTING, str(count))
+
+    def start_maximized(self) -> bool:
+        value = self.configuration_value(START_MAXIMIZED_SETTING, "")
+        if value not in (TRUE_SETTING, FALSE_SETTING):
+            return DEFAULT_START_MAXIMIZED
+        return value == TRUE_SETTING
+
+    def set_start_maximized(self, maximized: bool) -> None:
+        self.set_configuration_value(
+            START_MAXIMIZED_SETTING, TRUE_SETTING if maximized else FALSE_SETTING
+        )
+
+    def window_size(self) -> tuple[int, int]:
+        return (
+            self._window_dimension(
+                WINDOW_WIDTH_SETTING, DEFAULT_WINDOW_WIDTH, MINIMUM_WINDOW_WIDTH
+            ),
+            self._window_dimension(
+                WINDOW_HEIGHT_SETTING, DEFAULT_WINDOW_HEIGHT, MINIMUM_WINDOW_HEIGHT
+            ),
+        )
+
+    def set_window_width(self, width: int) -> None:
+        self.set_configuration_value(WINDOW_WIDTH_SETTING, str(width))
+
+    def set_window_height(self, height: int) -> None:
+        self.set_configuration_value(WINDOW_HEIGHT_SETTING, str(height))
+
+    def _window_dimension(self, name: str, default: int, minimum: int) -> int:
+        value = self.configuration_value(name, "").strip()
+        if value.isdigit() and minimum <= int(value) <= MAXIMUM_WINDOW_SIZE:
+            return int(value)
+        return default
 
     def current_instance_id(self) -> int:
         value = self.configuration_value(CURRENT_INSTANCE_SETTING, "")

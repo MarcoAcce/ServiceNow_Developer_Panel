@@ -20,7 +20,14 @@ from PySide6.QtWidgets import (
 from configuration.authentication_types import masked_details, type_label
 from core.background_task import BackgroundTask
 from configuration.config_dialogs import AuthenticationDialog, InstanceDialog
-from configuration.config_repository import Authentication, ConfigRepository, Instance
+from configuration.config_repository import (
+    MAXIMUM_WINDOW_SIZE,
+    MINIMUM_WINDOW_HEIGHT,
+    MINIMUM_WINDOW_WIDTH,
+    Authentication,
+    ConfigRepository,
+    Instance,
+)
 from core.database_manager import DatabaseError, DatabaseManager
 from ui.dialogs import ask_confirmation, show_error
 from storage.request_hints import RequestHintRepository
@@ -95,6 +102,18 @@ DUPLICATE_INSTANCE_MESSAGE: str = "An instance named {name} already exists."
 APPEARANCE_HINT: str = (
     "The selected theme is stored in the local database and reused on the next start."
 )
+WINDOW_SECTION: str = "Window"
+START_MAXIMIZED_LABEL: str = "Start maximized"
+WINDOW_SIZE_LABEL: str = "Start size"
+WINDOW_SIZE_SEPARATOR: str = "x"
+WINDOW_SIZE_SUFFIX: str = " px"
+WINDOW_HINT: str = (
+    "Used the next time the window opens. The start size applies when the window does not "
+    f"start maximized, and cannot be smaller than {MINIMUM_WINDOW_WIDTH} x "
+    f"{MINIMUM_WINDOW_HEIGHT}."
+)
+START_MAXIMIZED_SAVED_MESSAGE: str = "The window will start maximized."
+START_NORMAL_SAVED_MESSAGE: str = "The window will start at {width} x {height}."
 CACHE_HINT: str = (
     "Responses are reused for this long before the instance is queried again. The clean up "
     "deletes the expired responses, their cache files and the cache files nothing refers to."
@@ -351,6 +370,10 @@ class ConfigTab(Tab):
         self._expanded_instance_id: int | None = None
         self._cleanup_task: BackgroundTask | None = None
         self.theme_field: QComboBox = QComboBox()
+        self.start_maximized_box: QCheckBox = QCheckBox(START_MAXIMIZED_LABEL)
+        self.window_width_field: QSpinBox = QSpinBox()
+        self.window_height_field: QSpinBox = QSpinBox()
+        self.window_status_label: QLabel = QLabel()
         self.cache_lifetime_field: QSpinBox = QSpinBox()
         self.cleanup_button: QPushButton = QPushButton(CLEANUP_LABEL)
         self.cache_status_label: QLabel = QLabel()
@@ -379,6 +402,8 @@ class ConfigTab(Tab):
         layout.addWidget(horizontal_rule())
         layout.addWidget(section_label("Appearance"))
         layout.addLayout(self._build_appearance())
+        layout.addWidget(section_label(WINDOW_SECTION))
+        layout.addLayout(self._build_window())
         layout.addWidget(section_label("Cache"))
         layout.addLayout(self._build_cache())
         layout.addWidget(section_label("Suggestions"))
@@ -408,6 +433,41 @@ class ConfigTab(Tab):
         layout.addRow(THEME_LABEL, self.theme_field)
         layout.addRow(hint_label(APPEARANCE_HINT))
         return layout
+
+    def _build_window(self) -> QFormLayout:
+        layout = QFormLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.start_maximized_box.setChecked(self._repository.start_maximized())
+        self.start_maximized_box.toggled.connect(self._on_start_maximized_toggled)
+        layout.addRow(self.start_maximized_box)
+        layout.addRow(WINDOW_SIZE_LABEL, self._build_window_size())
+        layout.addRow(hint_label(WINDOW_HINT))
+        layout.addRow(self.window_status_label)
+        return layout
+
+    def _build_window_size(self) -> QWidget:
+        width, height = self._repository.window_size()
+        size = QWidget()
+        layout = QHBoxLayout(size)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(ACTION_SPACING)
+        fields = (
+            (self.window_width_field, MINIMUM_WINDOW_WIDTH, width),
+            (self.window_height_field, MINIMUM_WINDOW_HEIGHT, height),
+        )
+        for field, minimum, value in fields:
+            field.setFixedWidth(THEME_FIELD_WIDTH)
+            field.setRange(minimum, MAXIMUM_WINDOW_SIZE)
+            field.setSuffix(WINDOW_SIZE_SUFFIX)
+            field.setKeyboardTracking(False)
+            field.setValue(value)
+        self.window_width_field.valueChanged.connect(self._on_window_width_changed)
+        self.window_height_field.valueChanged.connect(self._on_window_height_changed)
+        layout.addWidget(self.window_width_field)
+        layout.addWidget(QLabel(WINDOW_SIZE_SEPARATOR))
+        layout.addWidget(self.window_height_field)
+        layout.addStretch(1)
+        return size
 
     def _build_cache(self) -> QFormLayout:
         layout = QFormLayout()
@@ -498,6 +558,39 @@ class ConfigTab(Tab):
             self._show_database_error(error)
             return
         self.themeChanged.emit(key)
+
+    def _on_start_maximized_toggled(self, maximized: bool) -> None:
+        try:
+            self._repository.set_start_maximized(maximized)
+        except (sqlite3.Error, DatabaseError) as error:
+            self._show_database_error(error)
+            return
+        self._show_window_status()
+
+    def _on_window_width_changed(self, width: int) -> None:
+        try:
+            self._repository.set_window_width(width)
+        except (sqlite3.Error, DatabaseError) as error:
+            self._show_database_error(error)
+            return
+        self._show_window_status()
+
+    def _on_window_height_changed(self, height: int) -> None:
+        try:
+            self._repository.set_window_height(height)
+        except (sqlite3.Error, DatabaseError) as error:
+            self._show_database_error(error)
+            return
+        self._show_window_status()
+
+    def _show_window_status(self) -> None:
+        if self.start_maximized_box.isChecked():
+            show_status(self.window_status_label, START_MAXIMIZED_SAVED_MESSAGE)
+            return
+        message = START_NORMAL_SAVED_MESSAGE.format(
+            width=self.window_width_field.value(), height=self.window_height_field.value()
+        )
+        show_status(self.window_status_label, message)
 
     def _on_cache_lifetime_changed(self, minutes: int) -> None:
         try:
