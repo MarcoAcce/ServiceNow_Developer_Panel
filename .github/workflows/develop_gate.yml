@@ -1,0 +1,15 @@
+name: Develop gate
+
+on:
+  push:
+    branches: [develop]
+
+permissions: {}
+
+jobs:
+  passed-develop:
+    name: passed-develop
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "$GITHUB_SHA reached develop"
