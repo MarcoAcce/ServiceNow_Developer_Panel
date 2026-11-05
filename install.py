@@ -11,10 +11,12 @@ from installer.installation import (
     DISPLAY_NAME,
     InstallError,
     InstallOptions,
+    InstallResult,
     default_target,
     install,
     is_supported_platform,
     uninstall,
+    update,
 )
 from installer.installer_window import WINDOW_TITLE, InstallerDialog
 from ui.theme import DARK_THEME, LIGHT_THEME, apply_theme
@@ -25,9 +27,15 @@ def parser() -> argparse.ArgumentParser:
         description=f"Install {DISPLAY_NAME}. Without --silent the setup window opens."
     )
     result.add_argument(
-        "--silent", action="store_true", help="install or uninstall without the window"
+        "--silent", action="store_true", help="install, update or uninstall without the window"
     )
-    result.add_argument("--uninstall", action="store_true", help="remove an installation")
+    action = result.add_mutually_exclusive_group()
+    action.add_argument("--uninstall", action="store_true", help="remove an installation")
+    action.add_argument(
+        "--update",
+        action="store_true",
+        help="replace the application files of an installation, keeping data and shortcuts",
+    )
     result.add_argument(
         "--target", type=Path, help=f"install folder (default {default_target()})"
     )
@@ -55,24 +63,30 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def install_silently(arguments: argparse.Namespace, target: Path) -> InstallResult:
+    if arguments.update:
+        return update(target)
+    import_data = arguments.import_data
+    return install(
+        InstallOptions(
+            target=target,
+            menu=arguments.menu,
+            desktop=arguments.desktop,
+            import_data=import_data.expanduser().resolve() if import_data else None,
+        )
+    )
+
+
 def run_silent(arguments: argparse.Namespace, target: Path) -> None:
     try:
         if arguments.uninstall:
             uninstall(target, arguments.remove_data)
             print(f"Uninstalled from {target}")
             return
-        import_data = arguments.import_data
-        result = install(
-            InstallOptions(
-                target=target,
-                menu=arguments.menu,
-                desktop=arguments.desktop,
-                import_data=import_data.expanduser().resolve() if import_data else None,
-            )
-        )
+        result = install_silently(arguments, target)
     except (InstallError, OSError) as error:
         sys.exit(str(error))
-    print(f"Installed {result.executable}")
+    print(f"{'Updated' if result.updated else 'Installed'} {result.executable}")
     print(f"MCP server {result.mcp_executable}")
     print(f"Data folder {result.data}")
     for shortcut in result.shortcuts:

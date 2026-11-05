@@ -29,7 +29,9 @@ from installer.installation import (
     launch,
     mcp_configuration,
     uninstall,
+    update,
     validate,
+    validate_update,
 )
 from ui.dialogs import FramelessDialog, ask_confirmation, show_error
 from ui.ui_widgets import (
@@ -67,9 +69,16 @@ COPY_LABEL: str = "Copy"
 COPIED_LABEL: str = "Copied"
 LAUNCH_LABEL: str = "Launch"
 INSTALLING_MESSAGE: str = "Installing..."
+UPDATING_MESSAGE: str = "Updating..."
 UNINSTALLING_MESSAGE: str = "Uninstalling..."
 RUNNING_TITLE: str = f"{DISPLAY_NAME} is running"
-UPDATE_MESSAGE: str = "An installation was found here: it will be updated and its data kept."
+UPDATE_MESSAGE: str = (
+    "An installation was found here. Update replaces the application files with the ones "
+    "of this setup and keeps the data folder and the shortcuts unchanged."
+)
+INSTALLED_TITLE: str = "Installation complete"
+UPDATED_TITLE: str = "Update complete"
+KEPT_MESSAGE: str = "The data folder and the shortcuts were kept."
 
 
 class InstallerDialog(FramelessDialog):
@@ -100,20 +109,8 @@ class InstallerDialog(FramelessDialog):
         self._target_status: QLabel = hint_label("")
         layout.addWidget(self._target_status)
 
-        layout.addWidget(section_label("Shortcuts"))
-        self._menu: QCheckBox = QCheckBox("Add to the application menu")
-        self._menu.setChecked(menu)
-        self._desktop: QCheckBox = QCheckBox("Add a desktop shortcut")
-        self._desktop.setChecked(desktop)
-        layout.addWidget(self._menu)
-        layout.addWidget(self._desktop)
-
-        layout.addWidget(section_label("Import data"))
-        self._import: QLineEdit = QLineEdit()
-        self._import.setPlaceholderText(DATA_PLACEHOLDER)
-        self._import_row: QWidget = QWidget()
-        self._import_row.setLayout(self._browse_row(self._import, self._choose_import))
-        layout.addWidget(self._import_row)
+        self._install_options: QWidget = self._build_install_options(menu, desktop)
+        layout.addWidget(self._install_options)
 
         self._progress: QProgressBar = QProgressBar()
         self._progress.setRange(0, 0)
@@ -139,12 +136,32 @@ class InstallerDialog(FramelessDialog):
         layout.addLayout(buttons)
         return page
 
+    def _build_install_options(self, menu: bool, desktop: bool) -> QWidget:
+        options = QWidget()
+        layout = QVBoxLayout(options)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SECTION_SPACING)
+        layout.addWidget(section_label("Shortcuts"))
+        self._menu: QCheckBox = QCheckBox("Add to the application menu")
+        self._menu.setChecked(menu)
+        self._desktop: QCheckBox = QCheckBox("Add a desktop shortcut")
+        self._desktop.setChecked(desktop)
+        layout.addWidget(self._menu)
+        layout.addWidget(self._desktop)
+
+        layout.addWidget(section_label("Import data"))
+        self._import: QLineEdit = QLineEdit()
+        self._import.setPlaceholderText(DATA_PLACEHOLDER)
+        layout.addLayout(self._browse_row(self._import, self._choose_import))
+        return options
+
     def _build_finished_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SECTION_SPACING)
-        layout.addWidget(title_label("Installation complete"))
+        self._finished_title: QLabel = title_label(INSTALLED_TITLE)
+        layout.addWidget(self._finished_title)
         self._summary: QLabel = hint_label("")
         layout.addWidget(self._summary)
         layout.addWidget(section_label("MCP server"))
@@ -201,20 +218,22 @@ class InstallerDialog(FramelessDialog):
         installed = is_installed(self._target_path())
         self._install.setText(UPDATE_LABEL if installed else INSTALL_LABEL)
         self._uninstall.setVisible(installed)
-        self._import_row.setEnabled(not installed)
         self._target_status.setText(UPDATE_MESSAGE if installed else "")
         self._target_status.setVisible(installed)
+        if self._install_options.isHidden() != installed:
+            self._install_options.setHidden(installed)
+            self.adjustSize()
 
     def _options(self) -> InstallOptions:
         return InstallOptions(
             target=self._target_path(),
             menu=self._menu.isChecked(),
             desktop=self._desktop.isChecked(),
-            import_data=None if is_installed(self._target_path()) else self._import_path(),
+            import_data=self._import_path(),
         )
 
     def _set_busy(self, message: str) -> None:
-        for widget in (self._target, self._menu, self._desktop, self._import_row):
+        for widget in (self._target, self._install_options):
             widget.setEnabled(False)
         for button in (self._install, self._uninstall, self._cancel):
             button.setEnabled(False)
@@ -223,7 +242,7 @@ class InstallerDialog(FramelessDialog):
 
     def _set_idle(self, message: str = "", failed: bool = False) -> None:
         self._task = None
-        for widget in (self._target, self._menu, self._desktop):
+        for widget in (self._target, self._install_options):
             widget.setEnabled(True)
         for button in (self._install, self._uninstall, self._cancel):
             button.setEnabled(True)
@@ -232,14 +251,30 @@ class InstallerDialog(FramelessDialog):
         self._refresh_target()
 
     def _start_install(self) -> None:
+        target = self._target_path()
+        if is_installed(target):
+            self._start_update(target)
+            return
         options = self._options()
         try:
             validate(options)
         except InstallError as error:
             show_error(self, WINDOW_TITLE, str(error))
             return
-        self._set_busy(INSTALLING_MESSAGE)
-        self._task = BackgroundTask(lambda: install(options), self)
+        self._run_install(INSTALLING_MESSAGE, lambda: install(options))
+
+    def _start_update(self, target: Path) -> None:
+        try:
+            validate_update(target)
+        except InstallError as error:
+            title = RUNNING_TITLE if is_running(target) else WINDOW_TITLE
+            show_error(self, title, str(error))
+            return
+        self._run_install(UPDATING_MESSAGE, lambda: update(target))
+
+    def _run_install(self, message: str, operation: Callable[[], InstallResult]) -> None:
+        self._set_busy(message)
+        self._task = BackgroundTask(operation, self)
         self._task.finished.connect(self._install_finished)
         self._task.failed.connect(self._task_failed)
         self._task.start()
@@ -247,6 +282,15 @@ class InstallerDialog(FramelessDialog):
     def _install_finished(self, result: InstallResult) -> None:
         self._set_idle()
         self._result = result
+        self._finished_title.setText(UPDATED_TITLE if result.updated else INSTALLED_TITLE)
+        self._summary.setText("\n".join(self._summary_lines(result)))
+        self._configuration.setPlainText(mcp_configuration(result.target))
+        self._pages.setCurrentIndex(1)
+        self.adjustSize()
+
+    def _summary_lines(self, result: InstallResult) -> list[str]:
+        if result.updated:
+            return [f"Updated in {result.target}", KEPT_MESSAGE]
         places = []
         if result.menu_shortcut is not None:
             places.append("the application menu")
@@ -257,10 +301,7 @@ class InstallerDialog(FramelessDialog):
             lines.append(f"Shortcuts added to {' and '.join(places)}.")
         if result.desktop_missing:
             lines.append("No desktop folder was found, the desktop shortcut was skipped.")
-        self._summary.setText("\n".join(lines))
-        self._configuration.setPlainText(mcp_configuration(result.target))
-        self._pages.setCurrentIndex(1)
-        self.adjustSize()
+        return lines
 
     def _start_uninstall(self) -> None:
         target = self._target_path()

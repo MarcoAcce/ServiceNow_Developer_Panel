@@ -27,9 +27,12 @@ MCP_CONFIGURATION_FILE_NAME: str = "mcp.json"
 MANIFEST_FILE_NAME: str = "installation.json"
 MANIFEST_VERSION: int = 1
 PAYLOAD_DIRECTORY_NAME: str = "payload"
+STAGING_DIRECTORY_NAME: str = ".update"
 INTERNAL_DIRECTORY_NAME: str = "_internal"
 SOURCE_DIRECTORY: Path = Path(__file__).resolve().parent.parent
-BUILD_PAYLOAD_DIRECTORY: Path = SOURCE_DIRECTORY / "dist" / APPLICATION_DIRECTORY_NAME
+BUILD_PAYLOAD_DIRECTORY: Path = (
+    SOURCE_DIRECTORY / "build" / PAYLOAD_DIRECTORY_NAME / APPLICATION_DIRECTORY_NAME
+)
 WINDOWS_SUFFIX: str = ".exe"
 DESKTOP_ENTRY_SUFFIX: str = ".desktop"
 WINDOWS_SHORTCUT_SUFFIX: str = ".lnk"
@@ -81,11 +84,14 @@ class InstallResult:
     menu_shortcut: Path | None
     desktop_shortcut: Path | None
     desktop_missing: bool
+    kept_shortcuts: tuple[Path, ...] = ()
+    updated: bool = False
 
     @property
     def shortcuts(self) -> tuple[Path, ...]:
         candidates = (self.menu_shortcut, self.desktop_shortcut)
-        return tuple(shortcut for shortcut in candidates if shortcut is not None)
+        created = tuple(shortcut for shortcut in candidates if shortcut is not None)
+        return (*self.kept_shortcuts, *created)
 
 
 def is_windows() -> bool:
@@ -318,6 +324,14 @@ def validate(options: InstallOptions) -> None:
     payload_entries()
 
 
+def validate_update(target: Path) -> None:
+    if not is_installed(target):
+        raise InstallError(f"No installation found in {target}")
+    read_manifest(target)
+    payload_entries()
+    ensure_not_running(target)
+
+
 def remove_entry(path: Path) -> None:
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
@@ -349,22 +363,28 @@ def normalize_permissions(directory: Path) -> None:
                 path.chmod(FILE_MODE)
 
 
-def copy_payload(target: Path) -> tuple[str, ...]:
+def copy_payload(destination: Path) -> tuple[str, ...]:
     payload = payload_directory()
     entries = payload_entries()
     for entry in entries:
         source = payload / entry
         if source.is_dir():
-            shutil.copytree(source, target / entry, symlinks=True)
+            shutil.copytree(source, destination / entry, symlinks=True)
         else:
-            shutil.copy2(source, target / entry)
+            shutil.copy2(source, destination / entry)
     if not is_windows():
-        application_executable(target).chmod(EXECUTABLE_MODE)
-        mcp_executable(target).chmod(EXECUTABLE_MODE)
+        application_executable(destination).chmod(EXECUTABLE_MODE)
+        mcp_executable(destination).chmod(EXECUTABLE_MODE)
         for entry in entries:
-            if (target / entry).is_dir():
-                normalize_permissions(target / entry)
+            if (destination / entry).is_dir():
+                normalize_permissions(destination / entry)
     return entries
+
+
+def write_mcp_configuration(target: Path) -> str:
+    configuration = target / MCP_CONFIGURATION_FILE_NAME
+    configuration.write_text(mcp_configuration(target) + "\n", encoding="utf-8")
+    return MCP_CONFIGURATION_FILE_NAME
 
 
 def install(options: InstallOptions) -> InstallResult:
@@ -372,10 +392,7 @@ def install(options: InstallOptions) -> InstallResult:
     target = options.target
     remove_previous(target)
     target.mkdir(parents=True, exist_ok=True)
-    entries = copy_payload(target)
-    configuration = target / MCP_CONFIGURATION_FILE_NAME
-    configuration.write_text(mcp_configuration(target) + "\n", encoding="utf-8")
-    entries = (*entries, MCP_CONFIGURATION_FILE_NAME)
+    entries = (*copy_payload(target), write_mcp_configuration(target))
 
     data = data_directory(target)
     if options.import_data is not None:
@@ -397,6 +414,44 @@ def install(options: InstallOptions) -> InstallResult:
         menu_shortcut=menu,
         desktop_shortcut=desktop,
         desktop_missing=options.desktop and desktop is None,
+    )
+    write_manifest(target, entries, result.shortcuts)
+    return result
+
+
+def replace_entries(target: Path, previous: tuple[str, ...]) -> tuple[str, ...]:
+    staging = target / STAGING_DIRECTORY_NAME
+    remove_entry(staging)
+    staging.mkdir()
+    try:
+        entries = copy_payload(staging)
+        ensure_not_running(target)
+        for entry in previous:
+            remove_entry(target / entry)
+        for entry in entries:
+            remove_entry(target / entry)
+            (staging / entry).replace(target / entry)
+    finally:
+        remove_entry(staging)
+    return entries
+
+
+def update(target: Path) -> InstallResult:
+    validate_update(target)
+    previous, shortcuts = read_manifest(target)
+    entries = (*replace_entries(target, previous), write_mcp_configuration(target))
+    data = data_directory(target)
+    data.mkdir(exist_ok=True)
+    result = InstallResult(
+        target=target,
+        executable=application_executable(target),
+        mcp_executable=mcp_executable(target),
+        data=data,
+        menu_shortcut=None,
+        desktop_shortcut=None,
+        desktop_missing=False,
+        kept_shortcuts=shortcuts,
+        updated=True,
     )
     write_manifest(target, entries, result.shortcuts)
     return result

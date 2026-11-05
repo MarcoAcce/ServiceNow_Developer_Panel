@@ -2,11 +2,13 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH).parent
 NAME = "ServiceNowDeveloperPanelSetup"
-PAYLOAD = ROOT / "dist" / "ServiceNowDeveloperPanel"
+PAYLOAD = ROOT / "build" / "payload" / "ServiceNowDeveloperPanel"
 ICON = str(ROOT / "assets" / "icon.ico")
 
 if not PAYLOAD.is_dir():
-    raise SystemExit(f"Build packaging/panel.spec first, {PAYLOAD} is missing")
+    raise SystemExit(f"Build packaging/panel.spec into build/payload first, {PAYLOAD} is missing")
+if (PAYLOAD / "data").exists():
+    raise SystemExit(f"{PAYLOAD / 'data'} must not be packaged, rebuild the payload")
 
 installer = Analysis(
     [str(ROOT / "install.py")],
