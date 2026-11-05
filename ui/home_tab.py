@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -24,7 +25,9 @@ from ui.ui_widgets import hint_label, horizontal_rule, section_label, title_labe
 BUTTONS_PER_ROW: int = 3
 BUTTON_MINIMUM_HEIGHT: int = 48
 FEATURED_TITLE_DELTA: int = 2
-FEATURED_ITEM_WIDTH: int = 280
+FEATURED_ITEM_WIDTH: int = 200
+BUTTON_MAXIMUM_WIDTH: int = 250
+BUTTON_MAXIMUM_HEIGHT: int = 72
 TABLE_API_TITLE: str = "Table APIs"
 HOME_HINT: str = "Pick a request type: a new request tab opens where you can set the target table and the filters."
 INSTANCE_SECTION: str = "Working instance"
@@ -84,6 +87,7 @@ class HomeTab(Tab):
             description = hint_label(request_type.description)
             description.setAlignment(Qt.AlignmentFlag.AlignTop)
             item = QWidget()
+            item.setMaximumWidth(BUTTON_MAXIMUM_WIDTH)
             layout = QVBoxLayout(item)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(button)
@@ -95,6 +99,7 @@ class HomeTab(Tab):
     def _build_group(self, group: str) -> QGroupBox:
         box = QGroupBox(group)
         layout = QGridLayout(box)
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         for index, request_type in enumerate(request_types_of_group(group)):
             layout.addWidget(
                 self._build_button(request_type),
@@ -106,6 +111,8 @@ class HomeTab(Tab):
     def _build_button(self, request_type: RequestType) -> QPushButton:
         button = QPushButton(request_type.button_label)
         button.setMinimumHeight(BUTTON_MINIMUM_HEIGHT)
+        button.setMaximumSize(BUTTON_MAXIMUM_WIDTH, BUTTON_MAXIMUM_HEIGHT)
+        button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setToolTip(request_type.description)
         button.clicked.connect(lambda: self.requestSelected.emit(request_type))
