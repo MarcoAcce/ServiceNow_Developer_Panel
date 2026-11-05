@@ -38,7 +38,7 @@ Note: Your credentials are only saved locally and sent to ServiceNow to authenti
 Each release includes two setup executables, for [Windows](https://github.com/MarcoAcce/ServiceNow_Developer_Panel/releases/latest/download/ServiceNowDeveloperPanelSetup.exe) and for [Linux](https://github.com/MarcoAcce/ServiceNow_Developer_Panel/releases/latest/download/ServiceNowDeveloperPanelSetup-linux-x86_64.tar.gz) . 
 
 
-Simply download the setup for your system and run it to install the application (portable ~180MB, but you can build the project yourself to save storage). 
+Simply download the setup for your system and run it to install the application (portable ~180MB, but you can build the project yourself to save storage). Running a newer setup on an existing installation updates it and keeps your data.
 
 The installers are not code-signed, so Windows SmartScreen may warn you the first time you run the setup. See [Building and installing](docs/build.md) for what to expect, how to verify the download and how to build it yourself.
 
@@ -48,5 +48,4 @@ This project is written entirely in Python.
 I used `Pyside6` for the UI and the `mcp` package for the MCP server.
 The list of packages needed to build this application is in the `requirement.txt` file.
 
-`build_linux.sh` and `build_windows.sh` build the application and its installer with a
-single command. See [Building and installing](docs/build.md).
+You can build the app or its installer yourself. See [Building and installing](docs/build.md).

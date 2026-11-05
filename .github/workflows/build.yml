@@ -44,7 +44,7 @@ jobs:
           virtual_environment/bin/python -m pip install -r requirements.txt
 
       - name: Build
-        run: ./build_linux.sh
+        run: ./build_setup_linux.sh
 
       - name: Install with the setup
         run: |
@@ -64,6 +64,22 @@ jobs:
           do
             test -e "$path" || { echo "Missing $path"; exit 1; }
           done
+
+      - name: Update with the setup
+        run: |
+          echo kept > "$INSTALL_DIR/data/update_marker"
+          dist/ServiceNowDeveloperPanelSetup --silent --update
+          for path in \
+            "$INSTALL_DIR/data/update_marker" \
+            "$INSTALL_DIR/ServiceNowDeveloperPanel" \
+            "$INSTALL_DIR/ServiceNowDeveloperPanelMcp" \
+            "$INSTALL_DIR/mcp.json" \
+            "$HOME/.local/share/applications/ServiceNowDeveloperPanel.desktop" \
+            "$HOME/Desktop/ServiceNowDeveloperPanel.desktop"
+          do
+            test -e "$path" || { echo "Missing $path after the update"; exit 1; }
+          done
+          test ! -e "$INSTALL_DIR/.update"
 
       - name: Start the application
         run: |
@@ -125,7 +141,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: ./build_windows.sh
+        run: ./build_setup_windows.sh
 
       - name: Install with the setup
         run: |
@@ -156,6 +172,25 @@ jobs:
               throw "$link points to $target"
             }
           }
+
+      - name: Update with the setup
+        run: |
+          Set-Content -LiteralPath "$env:INSTALL_DIR\data\update_marker" -Value kept
+          $setup = Start-Process -FilePath dist\ServiceNowDeveloperPanelSetup.exe `
+            -ArgumentList '--silent', '--update' -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "The update failed with exit code $($setup.ExitCode)" }
+          $paths = @(
+            "$env:INSTALL_DIR\data\update_marker",
+            "$env:INSTALL_DIR\ServiceNowDeveloperPanel.exe",
+            "$env:INSTALL_DIR\ServiceNowDeveloperPanelMcp.exe",
+            "$env:INSTALL_DIR\mcp.json",
+            (Join-Path ([Environment]::GetFolderPath('Programs')) $env:SHORTCUT_NAME),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) $env:SHORTCUT_NAME)
+          )
+          foreach ($path in $paths) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing $path after the update" }
+          }
+          if (Test-Path -LiteralPath "$env:INSTALL_DIR\.update") { throw "The staging folder was left" }
 
       - name: Start the application
         run: |
