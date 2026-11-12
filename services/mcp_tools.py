@@ -22,11 +22,20 @@ SERVER_INSTRUCTIONS: str = (
     "the table in table. Roles are granted to users in sys_user_has_role and to groups in "
     "sys_group_has_role, group members are in sys_user_grmember and roles contained in other "
     "roles in sys_user_role_contains: the roles field of sys_user and sys_user_group is not "
-    "reliable."
+    "reliable. When a request reports that the OAuth login of an instance must be renewed, "
+    "call login_oauth for that instance and retry."
 )
 LIST_INSTANCES_DESCRIPTION: str = (
     "List the configured ServiceNow instances and whether each has a usable MCP authentication "
     "method. The other tools take the instance name returned here."
+)
+LOGIN_OAUTH_DESCRIPTION: str = (
+    "Log the user in to an instance whose MCP authentication method is OAuth login, or check "
+    "that the stored login is still valid. When a new login is needed, the ServiceNow "
+    "Developer Panel opens the login page of the instance in the user's browser and waits up "
+    "to a minute for the user to allow the access; when the answer is still pending, call it "
+    "again to keep waiting. Call it when a request tool reports that the login must be "
+    "renewed, then retry the request. The tokens stay in the panel and are never returned."
 )
 REQUEST_TABLE_DESCRIPTION: str = (
     "Fetch records from one ServiceNow table. Returns a sample of the records, any warnings and "
@@ -91,12 +100,16 @@ REMOTE_APPEND: ToolAnnotations = ToolAnnotations(readOnlyHint=True, openWorldHin
 LOCAL_WRITE: ToolAnnotations = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
+LOGIN_ACTION: ToolAnnotations = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+)
 
 
 def build_server(session: McpSession) -> MCPServer:
     server = MCPServer(SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
     tools: tuple[tuple[Callable[..., object], str, ToolAnnotations], ...] = (
         (session.list_instances, LIST_INSTANCES_DESCRIPTION, LOCAL_READ),
+        (session.login_oauth, LOGIN_OAUTH_DESCRIPTION, LOGIN_ACTION),
         (session.describe_table, DESCRIBE_TABLE_DESCRIPTION, REMOTE_READ),
         (session.request_table, REQUEST_TABLE_DESCRIPTION, REMOTE_READ),
         (session.request_tables, REQUEST_TABLES_DESCRIPTION, REMOTE_READ),

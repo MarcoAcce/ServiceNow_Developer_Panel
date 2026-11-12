@@ -164,6 +164,9 @@ class MainWindow(FramelessWindow):
         self.sidebar.pageClosed.connect(self.remove_response_page)
         self.sidebar.pageRefreshed.connect(self.refresh_response_page)
         self.home_tab.requestSelected.connect(self.open_new_request_page)
+        self.home_tab.instance_selector.authenticationChanged.connect(
+            self.refresh_configuration
+        )
 
         self.sidebar.add_fixed_page(self.home_tab)
         self.sidebar.add_config_page(self.config_tab)
@@ -175,6 +178,9 @@ class MainWindow(FramelessWindow):
             request_type.key, self.service, self.repository, self.hints
         )
         request_page.set_instance_id(self.home_tab.current_instance_id())
+        request_page.instance_selector.authenticationChanged.connect(
+            self.refresh_configuration
+        )
         request_page.executed.connect(self.add_response_page)
         request_page.closed.connect(self.close_request_page)
         request_page.runningChanged.connect(self._set_busy)

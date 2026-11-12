@@ -767,9 +767,9 @@ class ConfigTab(Tab):
             return
         authentication_type, details = dialog.values()
         try:
-            first_method = not self._authentications(section, instance.id)
+            active = self._active_authentication(section, instance.id) is None
             self._create_authentication(
-                section, instance.id, authentication_type, details, first_method
+                section, instance.id, authentication_type, details, active
             )
         except (sqlite3.Error, DatabaseError, SecretError) as error:
             self._show_database_error(error)
@@ -829,6 +829,13 @@ class ConfigTab(Tab):
         except (sqlite3.Error, DatabaseError) as error:
             self._show_database_error(error)
         self._announce()
+
+    def _active_authentication(
+        self, section: AuthenticationSection, instance_id: int
+    ) -> Authentication | None:
+        if section.kind == MCP_KIND:
+            return self._repository.active_mcp_authentication(instance_id)
+        return self._repository.active_authentication(instance_id)
 
     def _authentications(
         self, section: AuthenticationSection, instance_id: int

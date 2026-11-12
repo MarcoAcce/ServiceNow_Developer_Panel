@@ -16,10 +16,9 @@ from configuration.authentication_types import (
     AuthenticationType,
 )
 from configuration.config_repository import Authentication, Instance
-from configuration.oauth_login_dialog import OAuthLoginDialog
-from core.background_task import BackgroundTask
-from core.oauth import USER_KEY
-from services.oauth_tokens import LoginState, OAuthTokenClient, verify_login
+from configuration.login_runner import LoginRunner
+from core.oauth import ACCESS_TOKEN_KEY, USER_KEY
+from services.oauth_tokens import LoginState
 from ui.dialogs import CANCEL_LABEL, FramelessDialog, show_error
 from ui.ui_widgets import hint_label, primary_button, show_status
 
@@ -42,8 +41,10 @@ LOGIN_LABEL: str = "Login"
 CHECKING_MESSAGE: str = "Checking the stored tokens on the instance..."
 LOGGED_IN_MESSAGE: str = "Logged in as {user}. Save to keep the tokens."
 TOKEN_ACCEPTED_MESSAGE: str = "The instance accepted the token. Save to keep the tokens."
-LOGIN_FAILED_MESSAGE: str = "The login failed: {message}."
 LOGIN_CANCELLED_MESSAGE: str = "The login was cancelled."
+LOGIN_BEFORE_SAVE_MESSAGE: str = (
+    "Use Login to log in to the instance before saving a new OAuth method."
+)
 STORED_USER_MESSAGE: str = "Last login: {user}."
 LOGIN_SPACING: int = 10
 
@@ -99,8 +100,8 @@ class AuthenticationDialog(FramelessDialog):
         )
         self.setMinimumWidth(AUTHENTICATION_DIALOG_WIDTH)
         self._instance: Instance = instance
-        self._client: OAuthTokenClient = OAuthTokenClient()
-        self._login_task: BackgroundTask | None = None
+        self._authentication: Authentication | None = authentication
+        self._runner: LoginRunner = LoginRunner(self)
         self.type_field: QComboBox = QComboBox()
         self.login_button: QPushButton = QPushButton(LOGIN_LABEL)
         self.login_status: QLabel = QLabel()
@@ -120,7 +121,18 @@ class AuthenticationDialog(FramelessDialog):
         if missing is not None:
             self._warn_missing(missing)
             return
+        if self._login_missing():
+            show_error(self, INVALID_INPUT_TITLE, LOGIN_BEFORE_SAVE_MESSAGE)
+            self.login_button.setFocus()
+            return
         super().accept()
+
+    def _login_missing(self) -> bool:
+        if self._authentication is not None:
+            return False
+        if self._selected_type().key != OAUTH_AUTHENTICATION.key:
+            return False
+        return not self._hidden.get((OAUTH_AUTHENTICATION.key, ACCESS_TOKEN_KEY), "").strip()
 
     def _build_ui(self) -> None:
         self.content_layout.addWidget(hint_label(AUTHENTICATION_HINT))
@@ -157,7 +169,10 @@ class AuthenticationDialog(FramelessDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(LOGIN_SPACING)
         self.login_button.setAutoDefault(False)
-        self.login_button.clicked.connect(self._on_try_login)
+        self.login_button.clicked.connect(self._on_login_clicked)
+        self._runner.succeeded.connect(self._on_login_succeeded)
+        self._runner.failed.connect(self._on_login_failed)
+        self._runner.cancelled.connect(self._on_login_cancelled)
         self.login_status.setWordWrap(True)
         layout.addWidget(self.login_button)
         layout.addWidget(self.login_status, 1)
@@ -207,45 +222,29 @@ class AuthenticationDialog(FramelessDialog):
         if user:
             show_status(self.login_status, STORED_USER_MESSAGE.format(user=user))
 
-    def _on_try_login(self) -> None:
-        if self._login_task is not None:
+    def _on_login_clicked(self) -> None:
+        if self._runner.is_running():
             return
         missing = self._missing_field(OAUTH_AUTHENTICATION)
         if missing is not None:
             self._warn_missing(missing)
             return
-        details = self._details_of(OAUTH_AUTHENTICATION)
         self.login_button.setEnabled(False)
         show_status(self.login_status, CHECKING_MESSAGE)
-        client = self._client
-        address = self._instance.address
-        task = BackgroundTask(lambda: verify_login(client, address, details), self)
-        task.finished.connect(self._on_login_checked)
-        task.failed.connect(self._on_login_check_failed)
-        self._login_task = task
-        task.start()
+        self._runner.start(self._instance, self._details_of(OAUTH_AUTHENTICATION))
 
-    def _on_login_checked(self, state: object) -> None:
-        self._release_login_task()
-        if not isinstance(state, LoginState):
-            return
-        if state.logged_in:
+    def _on_login_succeeded(self, state: object) -> None:
+        self.login_button.setEnabled(True)
+        if isinstance(state, LoginState):
             self._apply_login(state)
-            return
-        if not state.login_required:
-            show_status(
-                self.login_status, LOGIN_FAILED_MESSAGE.format(message=state.message), failed=True
-            )
-            return
-        dialog = OAuthLoginDialog(self._instance, state.details, self, state.message, self._client)
-        if dialog.exec() != OAuthLoginDialog.DialogCode.Accepted:
-            show_status(self.login_status, LOGIN_CANCELLED_MESSAGE)
-            return
-        self._apply_login(LoginState(dialog.details(), logged_in=True, user=dialog.user()))
 
-    def _on_login_check_failed(self, message: str) -> None:
-        self._release_login_task()
-        show_status(self.login_status, LOGIN_FAILED_MESSAGE.format(message=message), failed=True)
+    def _on_login_failed(self, message: str) -> None:
+        self.login_button.setEnabled(True)
+        show_status(self.login_status, message, failed=True)
+
+    def _on_login_cancelled(self) -> None:
+        self.login_button.setEnabled(True)
+        show_status(self.login_status, LOGIN_CANCELLED_MESSAGE)
 
     def _apply_login(self, state: LoginState) -> None:
         for field in OAUTH_AUTHENTICATION.hidden_fields:
@@ -255,13 +254,6 @@ class AuthenticationDialog(FramelessDialog):
         if state.user:
             message = LOGGED_IN_MESSAGE.format(user=state.user)
         show_status(self.login_status, message)
-
-    def _release_login_task(self) -> None:
-        task = self._login_task
-        self._login_task = None
-        self.login_button.setEnabled(True)
-        if task is not None:
-            task.deleteLater()
 
 
 def _form_buttons(dialog: FramelessDialog) -> tuple[QPushButton, QPushButton]:

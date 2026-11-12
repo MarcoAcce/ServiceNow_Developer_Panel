@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from configuration.config_repository import ConfigRepository, Instance
 from core.database_manager import DatabaseError
-from core.oauth import OAuthError
+from core.oauth import LoginRequired, OAuthError
 from core.request_model import (
     COMPOSITE_STATUS_CODE,
     LIMIT_PARAMETER,
@@ -44,10 +44,13 @@ from storage.response_repository import ResponseRepository, cached_result
 
 class RequestFailure(Exception):
 
-    def __init__(self, message: str, status_code: int = 0) -> None:
+    def __init__(
+        self, message: str, status_code: int = 0, login_required: bool = False
+    ) -> None:
         super().__init__(message)
         self.message: str = message
         self.status_code: int = status_code
+        self.login_required: bool = login_required
 
 
 class SyncRequestService:
@@ -146,6 +149,8 @@ class SyncRequestService:
     def _authorization(self, resolve: Callable[[], str]) -> str:
         try:
             return resolve()
+        except LoginRequired as error:
+            raise RequestFailure(str(error), login_required=True) from None
         except (ServiceConfigurationError, OAuthError) as error:
             raise RequestFailure(str(error)) from None
 

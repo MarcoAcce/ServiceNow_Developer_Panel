@@ -1,4 +1,5 @@
 import sqlite3
+from dataclasses import replace
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -14,8 +15,10 @@ from core.acl.acl_requests import verification_request
 from core.acl.acl_verification import FIELD_OPERATIONS, Verification, evaluate, normalized_profiles
 from core.app_paths import data_directory
 from storage.cache_query import run_script
-from configuration.config_repository import ConfigRepository, Instance
+from configuration.authentication_types import is_oauth, type_label
+from configuration.config_repository import Authentication, ConfigRepository, Instance
 from core.database_manager import RESPONSE_TIME_FORMAT, DatabaseError, DatabaseManager
+from core.oauth import LOGIN_CANCELLED_MESSAGE, USER_KEY, LoginRequired
 from core.query_conditions import query_fields
 from core.record_columns import ordered_columns
 from core.request_model import (
@@ -53,7 +56,13 @@ from storage.response_repository import (
     received_at_of,
     request_parts,
 )
-from services.oauth_tokens import LoginHandler, TokenManager, mcp_token_store
+from services.oauth_tokens import (
+    LoginHandler,
+    OAuthTokenClient,
+    TokenManager,
+    mcp_token_store,
+    verify_login,
+)
 from services.sync_service import RequestFailure, SyncRequestService, mcp_target
 from storage.table_export import CSV_FORMAT, XLSX_SUFFIX, export_csv, export_xlsx
 
@@ -151,6 +160,20 @@ UNREADABLE_MCP_AUTHENTICATION_MESSAGE: str = (
     "machine, as the panel that saved it."
 )
 REQUEST_FAILED_MESSAGE: str = "The request to {instance} failed{status}: {message}"
+LOGIN_RENEWAL_MESSAGE: str = (
+    "The OAuth login of {instance} must be renewed ({reason}). Call login_oauth with this "
+    "instance so that the user can log in again, then retry."
+)
+LOGIN_CHECK_FAILED_MESSAGE: str = "The login to {name} could not be checked: {message}"
+NO_LOGIN_NEEDED_MESSAGE: str = (
+    "The MCP authentication method of {name} is {label}: it needs no login."
+)
+LOGGED_IN_MESSAGE: str = "The user is logged in to {name}{user}."
+USER_SUFFIX: str = " as {user}"
+NO_LOGIN_HANDLER_MESSAGE: str = (
+    "The ServiceNow Developer Panel cannot open the login from here: ask the user to log in "
+    "to {name} from Configuration."
+)
 STATUS_SUFFIX: str = " with HTTP status {status}"
 UNKNOWN_CACHE_MESSAGE: str = (
     "There is no cached response named {name}. Use list_cached_responses to see the available ones."
@@ -209,6 +232,14 @@ class TableQuery(TypedDict):
     fields: NotRequired[FieldNames]
     order_by: NotRequired[OrderField]
     limit: NotRequired[RecordLimit]
+
+
+class LoginPayload(TypedDict):
+    instance: str
+    authentication_type: str
+    logged_in: bool
+    user: str
+    message: str
 
 
 class InstancePayload(TypedDict):
@@ -304,9 +335,59 @@ class McpSession:
         self._database: DatabaseManager = database
         self._repository: ConfigRepository = ConfigRepository(database)
         self._responses: ResponseRepository = ResponseRepository(database)
+        self._login: LoginHandler | None = login
+        self._client: OAuthTokenClient = OAuthTokenClient()
         self._service: SyncRequestService = SyncRequestService(
-            self._responses,
-            TokenManager(mcp_token_store(self._repository), login=login),
+            self._responses, TokenManager(mcp_token_store(self._repository))
+        )
+
+    def login_oauth(self, instance: InstanceName) -> LoginPayload:
+        with local_failures():
+            found = self._instance(instance)
+            target = self._checked_target(found)
+            authentication = target.authentication
+            if authentication is None:
+                raise ToolError(NO_MCP_AUTHENTICATION_MESSAGE.format(name=found.name))
+            if not is_oauth(authentication.authentication_type):
+                label = type_label(authentication.authentication_type)
+                message = NO_LOGIN_NEEDED_MESSAGE.format(name=found.name, label=label)
+                return self._login_payload(found, authentication, message)
+            state = verify_login(self._client, found.address, authentication.details)
+            if state.logged_in:
+                return self._logged_in(found, replace(authentication, details=state.details))
+            if not state.login_required:
+                raise ToolError(
+                    LOGIN_CHECK_FAILED_MESSAGE.format(name=found.name, message=state.message)
+                )
+            if self._login is None:
+                raise ToolError(NO_LOGIN_HANDLER_MESSAGE.format(name=found.name))
+            try:
+                renewed = self._login(target, state.message)
+            except LoginRequired as error:
+                raise ToolError(_sentence(str(error))) from None
+            if renewed is None:
+                raise ToolError(_sentence(LOGIN_CANCELLED_MESSAGE))
+            return self._logged_in(found, renewed)
+
+    def _logged_in(self, instance: Instance, authentication: Authentication) -> LoginPayload:
+        self._repository.update_mcp_authentication_details(
+            authentication.id, authentication.details
+        )
+        user = authentication.details.get(USER_KEY, "").strip()
+        suffix = USER_SUFFIX.format(user=user) if user else ""
+        return self._login_payload(
+            instance, authentication, LOGGED_IN_MESSAGE.format(name=instance.name, user=suffix)
+        )
+
+    def _login_payload(
+        self, instance: Instance, authentication: Authentication, message: str
+    ) -> LoginPayload:
+        return LoginPayload(
+            instance=instance.name,
+            authentication_type=authentication.authentication_type,
+            logged_in=True,
+            user=authentication.details.get(USER_KEY, "").strip(),
+            message=message,
         )
 
     def list_instances(self) -> list[InstancePayload]:
@@ -587,12 +668,22 @@ class McpSession:
         try:
             return self._service.send(request)
         except RequestFailure as failure:
+            if failure.login_required:
+                raise ToolError(
+                    LOGIN_RENEWAL_MESSAGE.format(
+                        instance=request.target.label, reason=failure.message
+                    )
+                ) from None
             status = STATUS_SUFFIX.format(status=failure.status_code) if failure.status_code else ""
             raise ToolError(
                 REQUEST_FAILED_MESSAGE.format(
                     instance=request.target.label, status=status, message=failure.message
                 )
             ) from None
+
+
+def _sentence(message: str) -> str:
+    return message[:1].upper() + message[1:]
 
 
 @contextmanager

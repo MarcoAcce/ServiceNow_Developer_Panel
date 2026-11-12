@@ -11,16 +11,17 @@ from core.request_model import RequestTarget
 OFFSCREEN_PLATFORM: str = "offscreen"
 LOGIN_WAIT_SECONDS: float = 60.0
 LOGIN_PENDING_MESSAGE: str = (
-    "the ServiceNow Developer Panel is asking the user to log in to {name} in its built-in "
-    "browser: ask the user to complete the login, then call the tool again"
+    "the ServiceNow Developer Panel opened the login page of {name} in the browser of the "
+    "user and is still waiting for the user to allow the access: ask the user to finish, "
+    "then call login_oauth again to keep waiting"
 )
 LOGIN_CANCELLED_MESSAGE: str = (
     "the user cancelled the login to {name} in the ServiceNow Developer Panel"
 )
 NO_DISPLAY_MESSAGE: str = (
-    "the ServiceNow Developer Panel core runs without a display and cannot open its built-in "
-    "browser: ask the user to start the ServiceNow Developer Panel and to log in to {name} "
-    "from Configuration"
+    "the ServiceNow Developer Panel core runs without a display and cannot open the login: "
+    "ask the user to start the ServiceNow Developer Panel and to log in to {name} from "
+    "Configuration"
 )
 
 
