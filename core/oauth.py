@@ -9,7 +9,7 @@ TOKEN_PATH: str = "/oauth_token.do"
 CURRENT_USER_PATH: str = "/api/now/ui/user/current_user"
 DEFAULT_SCHEME: str = "https://"
 SCHEME_SEPARATOR: str = "://"
-EXAMPLE_REDIRECT_URI: str = "http://localhost:8431/oauth/callback"
+DEFAULT_REDIRECT_URI: str = "http://localhost:8431/oauth/callback"
 CLIENT_ID_KEY: str = "client_id"
 CLIENT_SECRET_KEY: str = "client_secret"
 REDIRECT_URI_KEY: str = "redirect_uri"
@@ -103,6 +103,10 @@ def endpoint_url(address: str, path: str) -> str:
 
 def redirect_uri_of(details: dict[str, str]) -> str:
     return details.get(REDIRECT_URI_KEY, "").strip()
+
+
+def serving_redirect_uri(details: dict[str, str]) -> str:
+    return redirect_uri_of(details) or DEFAULT_REDIRECT_URI
 
 
 def authorization_url(address: str, details: dict[str, str], state: str) -> str:
@@ -216,11 +220,6 @@ def parse_callback(url: str) -> CallbackResult | None:
         error=error,
         description=_first(query, ERROR_DESCRIPTION_KEY),
     )
-
-
-def is_callback(url: str, state: str) -> bool:
-    callback = parse_callback(url)
-    return callback is not None and callback.state == state
 
 
 def _with_redirect(fields: dict[str, str], details: dict[str, str]) -> dict[str, str]:

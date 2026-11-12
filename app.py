@@ -503,7 +503,6 @@ def use_offscreen_without_display() -> None:
 
 
 def create_application() -> QApplication:
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
     app = QApplication([])
     app.setApplicationName(APPLICATION_NAME)
     app.setApplicationDisplayName(APPLICATION_NAME)

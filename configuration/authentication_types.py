@@ -4,7 +4,7 @@ from core.oauth import (
     ACCESS_TOKEN_KEY,
     CLIENT_ID_KEY,
     CLIENT_SECRET_KEY,
-    EXAMPLE_REDIRECT_URI,
+    DEFAULT_REDIRECT_URI,
     EXPIRES_AT_KEY,
     REDIRECT_URI_KEY,
     REFRESH_TOKEN_KEY,
@@ -63,12 +63,12 @@ OAUTH_AUTHENTICATION: AuthenticationType = AuthenticationType(
     label="OAuth login",
     description=(
         "Authorization code flow: in the application registry of the instance, create an "
-        "OAuth API endpoint for external clients and copy its client id and client secret "
-        "here. Its redirect URL can be any address, for example {example}: nothing has to "
-        "answer there, the panel reads the answer of the instance before it is loaded. Login "
-        "opens the login page of the instance and keeps the tokens it issues; the requests "
-        "use them and renew them on their own."
-    ).format(example=EXAMPLE_REDIRECT_URI),
+        "OAuth API endpoint for external clients with {default} as redirect URL, then copy "
+        "its client id and client secret here. Enter the redirect URL below only if you "
+        "registered another address on this computer. Login opens the login page in your "
+        "browser; the panel receives the answer on the redirect URL and keeps the tokens "
+        "it is issued, renewing them on its own."
+    ).format(default=DEFAULT_REDIRECT_URI),
     fields=(
         AuthenticationField(
             CLIENT_ID_KEY, "Client id", placeholder="Client ID of the application registry entry"
@@ -78,7 +78,7 @@ OAUTH_AUTHENTICATION: AuthenticationType = AuthenticationType(
             REDIRECT_URI_KEY,
             "Redirect URL",
             required=False,
-            placeholder="Only when the registry entry lists several redirect URLs",
+            placeholder=DEFAULT_REDIRECT_URI,
         ),
         AuthenticationField(USER_KEY, "User", required=False, hidden=True),
         AuthenticationField(

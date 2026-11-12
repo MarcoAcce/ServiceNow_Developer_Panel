@@ -1,55 +1,58 @@
-from typing import TYPE_CHECKING
-
-from PySide6.QtCore import QRect, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QShowEvent
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
 from configuration.config_repository import Instance
 from core.background_task import BackgroundTask
 from core.oauth import (
     NO_CODE_MESSAGE,
+    SCHEME_SEPARATOR,
     STATE_MISMATCH_MESSAGE,
     authorization_url,
     new_state,
     parse_callback,
+    serving_redirect_uri,
 )
+from services.callback_server import CallbackServer, CallbackServerError
 from services.oauth_tokens import LoginState, OAuthTokenClient, complete_login
 from ui.dialogs import CANCEL_LABEL, FramelessDialog
 from ui.ui_widgets import hint_label, show_status
 
-if TYPE_CHECKING:
-    from ui.widgets.login_browser import LoginBrowser
-
 LOGIN_TITLE: str = "Log in to {name}"
 LOGIN_HINT: str = (
-    "Sign in to {address} and allow the access. The built-in browser reads the answer of "
-    "the instance as soon as it redirects to the redirect URL of the application registry "
-    "entry, before that address is loaded, so nothing has to answer there."
+    "Sign in to {address} in the browser that just opened and allow the access. The instance "
+    "then sends the browser to {redirect_uri}, where the panel receives the authorization "
+    "code and completes the login on its own. If that page cannot be reached, copy the code "
+    "or the address from the browser and paste it below."
 )
-LINKS_TEXT: str = (
-    '<a href="{builtin}">Open the login page</a> in the built-in browser, or '
-    '<a href="{system}">open it in your browser</a>: in that case the redirect URL '
-    "receives the answer, paste below the address you land on."
+LINK_TEXT: str = 'If the browser did not open, <a href="{open}">open the login page</a> again.'
+OPEN_LINK: str = "open"
+CODE_PLACEHOLDER: str = "Authorization code, or the address of the page you landed on"
+USE_CODE_LABEL: str = "Use code"
+WAITING_MESSAGE: str = "Waiting for the login to complete in your browser..."
+BROWSER_FAILED_MESSAGE: str = "The browser could not be opened: use the link above."
+SERVER_UNAVAILABLE_MESSAGE: str = (
+    "The panel cannot receive the answer on its own ({reason}): after the login, copy the "
+    "code from the page you land on and paste it below."
 )
-BUILTIN_LINK: str = "builtin"
-SYSTEM_LINK: str = "system"
-ADDRESS_PLACEHOLDER: str = "The address you were redirected to, with its code and state"
-USE_ADDRESS_LABEL: str = "Use address"
-BROWSER_OPENED_MESSAGE: str = "Waiting for the login to complete in the built-in browser..."
-SYSTEM_OPENED_MESSAGE: str = "Waiting for the redirected address to be pasted above..."
 EXCHANGING_MESSAGE: str = "Exchanging the authorization code for the tokens..."
 LOGIN_FAILED_MESSAGE: str = "The login failed: {message}."
-BROWSER_UNAVAILABLE_MESSAGE: str = (
-    "The built-in browser is not available ({error}): open the login page in your browser "
-    "and paste the redirected address."
-)
 STALE_TOKENS_MESSAGE: str = "A new login is needed: {reason}."
 DIALOG_WIDTH: int = 640
-BROWSER_WIDTH: int = 960
-BROWSER_HEIGHT: int = 680
-HORIZONTAL_MARGIN: int = 80
-VERTICAL_MARGIN: int = 280
-ADDRESS_SPACING: int = 8
+CODE_SPACING: int = 8
+PATH_PREFIXES: tuple[str, ...] = ("/", "?")
+
+
+def open_in_browser(url: str) -> bool:
+    return QDesktopServices.openUrl(QUrl(url))
+
+
+class CallbackRelay(QObject):
+
+    received = Signal(str)
+
+    def notify(self, url: str) -> None:
+        self.received.emit(url)
 
 
 class OAuthLoginDialog(FramelessDialog):
@@ -62,22 +65,26 @@ class OAuthLoginDialog(FramelessDialog):
         reason: str = "",
         client: OAuthTokenClient | None = None,
     ) -> None:
-        super().__init__(LOGIN_TITLE.format(name=instance.name), parent, resizable=True)
+        super().__init__(LOGIN_TITLE.format(name=instance.name), parent)
+        self.setMinimumWidth(DIALOG_WIDTH)
         self._instance: Instance = instance
         self._details: dict[str, str] = dict(details)
         self._client: OAuthTokenClient = client or OAuthTokenClient()
         self._state: str = new_state()
+        self._redirect_uri: str = serving_redirect_uri(details)
         self._url: str = authorization_url(instance.address, details, self._state)
         self._result: LoginState | None = None
         self._task: BackgroundTask | None = None
-        self._browser: LoginBrowser | None = None
-        self.address_field: QLineEdit = QLineEdit()
-        self.use_button: QPushButton = QPushButton(USE_ADDRESS_LABEL)
+        self._server: CallbackServer | None = None
+        self._server_problem: str = ""
+        self._opened: bool = False
+        self._relay: CallbackRelay = CallbackRelay(self)
+        self._relay.received.connect(self._on_callback, Qt.ConnectionType.QueuedConnection)
+        self.code_field: QLineEdit = QLineEdit()
+        self.use_button: QPushButton = QPushButton(USE_CODE_LABEL)
         self.status_label: QLabel = QLabel()
-        self._browser_layout: QVBoxLayout = QVBoxLayout()
-        self._build_ui()
-        if reason:
-            show_status(self.status_label, STALE_TOKENS_MESSAGE.format(reason=reason))
+        self._build_ui(reason)
+        self._start_server()
 
     def details(self) -> dict[str, str]:
         if self._result is None:
@@ -90,37 +97,44 @@ class OAuthLoginDialog(FramelessDialog):
     def login_url(self) -> str:
         return self._url
 
+    def redirect_uri(self) -> str:
+        return self._redirect_uri
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._opened:
+            self._opened = True
+            self._open_browser()
+
     def done(self, result: int) -> None:
         self._release_task(cancel=True)
-        if self._browser is not None:
-            self._browser.reset()
+        self._stop_server()
         super().done(result)
 
-    def _build_ui(self) -> None:
-        hint = hint_label(LOGIN_HINT.format(address=self._instance.address))
-        hint.setMinimumWidth(DIALOG_WIDTH)
-        self.content_layout.addWidget(hint)
-        links = QLabel(LINKS_TEXT.format(builtin=BUILTIN_LINK, system=SYSTEM_LINK))
-        links.setTextFormat(Qt.TextFormat.RichText)
-        links.setWordWrap(True)
-        links.setOpenExternalLinks(False)
-        links.setTextInteractionFlags(
+    def _build_ui(self, reason: str) -> None:
+        hint = LOGIN_HINT.format(address=self._instance.address, redirect_uri=self._redirect_uri)
+        self.content_layout.addWidget(hint_label(hint))
+        if reason:
+            self.content_layout.addWidget(hint_label(STALE_TOKENS_MESSAGE.format(reason=reason)))
+        link = QLabel(LINK_TEXT.format(open=OPEN_LINK))
+        link.setTextFormat(Qt.TextFormat.RichText)
+        link.setWordWrap(True)
+        link.setOpenExternalLinks(False)
+        link.setTextInteractionFlags(
             Qt.TextInteractionFlag.LinksAccessibleByMouse
             | Qt.TextInteractionFlag.LinksAccessibleByKeyboard
         )
-        links.linkActivated.connect(self._on_link)
-        self.content_layout.addWidget(links)
+        link.linkActivated.connect(self._on_link)
+        self.content_layout.addWidget(link)
         row = QHBoxLayout()
-        row.setSpacing(ADDRESS_SPACING)
-        self.address_field.setPlaceholderText(ADDRESS_PLACEHOLDER)
-        self.address_field.returnPressed.connect(self._on_use_address)
+        row.setSpacing(CODE_SPACING)
+        self.code_field.setPlaceholderText(CODE_PLACEHOLDER)
+        self.code_field.returnPressed.connect(self._on_use_code)
         self.use_button.setAutoDefault(False)
-        self.use_button.clicked.connect(self._on_use_address)
-        row.addWidget(self.address_field, 1)
+        self.use_button.clicked.connect(self._on_use_code)
+        row.addWidget(self.code_field, 1)
         row.addWidget(self.use_button)
         self.content_layout.addLayout(row)
-        self._browser_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.addLayout(self._browser_layout, 1)
         self.status_label.setWordWrap(True)
         self.content_layout.addWidget(self.status_label)
         cancel_button = QPushButton(CANCEL_LABEL)
@@ -128,79 +142,46 @@ class OAuthLoginDialog(FramelessDialog):
         cancel_button.clicked.connect(self.reject)
         self.add_button_row(cancel_button)
 
-    def _on_link(self, name: str) -> None:
-        if self._task is not None:
-            return
-        if name == BUILTIN_LINK:
-            self._open_builtin()
-        elif name == SYSTEM_LINK:
-            self._open_system()
-
-    def _open_builtin(self) -> None:
-        browser = self._browser if self._browser is not None else self._create_browser()
-        if browser is None:
-            return
-        width, height = self._browser_size()
-        browser.setMinimumSize(width, height)
-        browser.setVisible(True)
-        self._grow()
-        browser.open(self._url)
-        show_status(self.status_label, BROWSER_OPENED_MESSAGE)
-
-    def _create_browser(self) -> "LoginBrowser | None":
+    def _start_server(self) -> None:
         try:
-            from ui.widgets.login_browser import LoginBrowser
-        except (ImportError, OSError) as error:
-            show_status(
-                self.status_label, BROWSER_UNAVAILABLE_MESSAGE.format(error=error), failed=True
-            )
-            return None
-        browser = LoginBrowser(self._state, self)
-        browser.callbackReached.connect(self._on_callback)
-        self._browser_layout.addWidget(browser)
-        self._browser = browser
-        return browser
-
-    def _browser_size(self) -> tuple[int, int]:
-        available = self._available_geometry()
-        return (
-            min(BROWSER_WIDTH, available.width() - HORIZONTAL_MARGIN),
-            min(BROWSER_HEIGHT, available.height() - VERTICAL_MARGIN),
-        )
-
-    def _available_geometry(self) -> QRect:
-        screen = self.screen() or QGuiApplication.primaryScreen()
-        if screen is None:
-            return QRect(0, 0, BROWSER_WIDTH, BROWSER_HEIGHT)
-        return screen.availableGeometry()
-
-    def _grow(self) -> None:
-        self._activate_layout()
-        self.adjustSize()
-        frame = self.frameGeometry()
-        frame.moveCenter(self._available_geometry().center())
-        self.move(frame.topLeft())
-
-    def _hide_browser(self) -> None:
-        if self._browser is None:
+            server = CallbackServer(self._redirect_uri, self._state, self._relay.notify)
+            server.start()
+        except CallbackServerError as error:
+            self._server_problem = str(error)
             return
-        self._browser.reset()
-        self._browser.setVisible(False)
-        self._browser.setMinimumSize(0, 0)
-        self._activate_layout()
-        self.adjustSize()
+        self._server = server
 
-    def _activate_layout(self) -> None:
-        layout = self.layout()
-        if layout is not None:
-            layout.activate()
+    def _stop_server(self) -> None:
+        server = self._server
+        self._server = None
+        if server is not None:
+            server.stop()
 
-    def _open_system(self) -> None:
-        QDesktopServices.openUrl(QUrl(self._url))
-        show_status(self.status_label, SYSTEM_OPENED_MESSAGE)
+    def _open_browser(self) -> None:
+        if not open_in_browser(self._url):
+            show_status(self.status_label, BROWSER_FAILED_MESSAGE, failed=True)
+            return
+        self._show_waiting()
 
-    def _on_use_address(self) -> None:
-        self._on_callback(self.address_field.text())
+    def _show_waiting(self) -> None:
+        if self._server_problem:
+            message = SERVER_UNAVAILABLE_MESSAGE.format(reason=self._server_problem)
+        else:
+            message = WAITING_MESSAGE
+        show_status(self.status_label, message)
+
+    def _on_link(self, name: str) -> None:
+        if name == OPEN_LINK and self._task is None:
+            self._open_browser()
+
+    def _on_use_code(self) -> None:
+        text = self.code_field.text().strip()
+        if not text or self._task is not None:
+            return
+        if SCHEME_SEPARATOR in text or text.startswith(PATH_PREFIXES):
+            self._on_callback(text)
+            return
+        self._exchange(text)
 
     def _on_callback(self, url: str) -> None:
         if self._task is not None:
@@ -215,15 +196,14 @@ class OAuthLoginDialog(FramelessDialog):
         if callback.state != self._state:
             self._fail(STATE_MISMATCH_MESSAGE)
             return
-        self._hide_browser()
         self._exchange(callback.code)
 
     def _fail(self, message: str) -> None:
-        self._hide_browser()
         show_status(self.status_label, LOGIN_FAILED_MESSAGE.format(message=message), failed=True)
 
     def _exchange(self, code: str) -> None:
         self.use_button.setEnabled(False)
+        self.code_field.setEnabled(False)
         show_status(self.status_label, EXCHANGING_MESSAGE)
         client = self._client
         address = self._instance.address
@@ -239,21 +219,20 @@ class OAuthLoginDialog(FramelessDialog):
         if not isinstance(state, LoginState):
             return
         if not state.logged_in:
-            show_status(
-                self.status_label, LOGIN_FAILED_MESSAGE.format(message=state.message), failed=True
-            )
+            self._fail(state.message)
             return
         self._result = state
         self.accept()
 
     def _on_exchange_failed(self, message: str) -> None:
         self._release_task()
-        show_status(self.status_label, LOGIN_FAILED_MESSAGE.format(message=message), failed=True)
+        self._fail(message)
 
     def _release_task(self, cancel: bool = False) -> None:
         task = self._task
         self._task = None
         self.use_button.setEnabled(True)
+        self.code_field.setEnabled(True)
         if task is None:
             return
         if cancel:
