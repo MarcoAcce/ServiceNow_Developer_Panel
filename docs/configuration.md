@@ -15,10 +15,9 @@ instance can be active at a time.
 Choose your authentication method:
 
 - **Basic authentication**: user name and password, sent on every request.
-- **OAuth token**: client id, client secret and refresh token of an OAuth application registry entry. The access token is optional.
-- **JWT token**: a signed JWT exchanged for an access token by the instance.
+- **OAuth login**: client id and client secret of an OAuth API endpoint registered on the instance with `http://localhost:8431/oauth/callback` as redirect URL. You log in to the instance in your browser and the panel keeps the tokens it is issued, renewing them on its own. A new OAuth method must be logged in before it can be saved. See [OAuth login](oauth.md) for the setup on the instance and the login flow.
 
-Each instance also has a separate list of *MCP authentication* methods, used only by the local MCP server.
+A method added to an instance that has no active method becomes active. Each instance also has a separate list of *MCP authentication* methods, used only by the local MCP server.
 
 Credentials are encrypted and stored in the local database: they are sent to ServiceNow only to authenticate your requests.
 
@@ -30,6 +29,7 @@ Credentials are encrypted and stored in the local database: they are sent to Ser
 
 # Links
 
-- [database](Database.md)
+- [database](database.md)
+- [OAuth login](oauth.md)
 - [MCP server](mcp.md)
 - [Back to README](../README.md)

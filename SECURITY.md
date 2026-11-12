@@ -16,7 +16,7 @@ Only the latest release receives fixes.
 
 Knowing what the application does helps when judging a report:
 
-- It stores your ServiceNow instances and credentials (basic, OAuth or JWT) in a local database, encrypted with a key tied to your machine and user. The credentials are sent only to the ServiceNow instance you configure.
+- It stores your ServiceNow instances and credentials (basic or OAuth) in a local database, encrypted with a key tied to your machine and user. The credentials are sent only to the ServiceNow instance you configure.
 - Only the credentials are encrypted at rest. The data you retrieve from your instances is kept in a local cache on your machine, unencrypted apart from what your operating system provides. If that is a concern, switch to in-memory caching, so that retrieved data is never written to disk.
 - It makes read-only requests (GET on the Table API). It does not write to your instances.
 - The MCP server exposes the same read-only operations to the AI agent you connect. The agent does not see your credentials, but it can read any data the configured account is allowed to read, and that data is then processed by the agent and its provider. Use an account with the least privilege needed, and follow your organization's policies.

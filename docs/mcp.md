@@ -13,6 +13,7 @@ This lets them study the instance as deeply as they need, with joins and group b
 | Tool | Purpose |
 | --- | --- |
 | `list_instances` | List the configured instances |
+| `login_oauth` | Log the user in again when the OAuth login of an instance must be renewed |
 | `request_table` | Fetch records from one table |
 | `request_tables` | Fetch several tables into one cache, so they can be joined |
 | `add_tables` | Add tables to an existing cache |
@@ -26,6 +27,7 @@ This lets them study the instance as deeply as they need, with joins and group b
 
 Instances and credentials are managed through the main application: add an *MCP authentication* method to each instance the server should reach (see [Configuration](configuration.md)).
 Agents never see these credentials.
+When the MCP method is an [OAuth login](oauth.md) and a request reports that the login must be renewed, the agent calls `login_oauth`: the panel opens the login page in your browser and waits for you to allow the access.
 
 The installer saves an `mcp.json` file in the install folder. 
 Add its content to the MCP configuration of your client, for example [`mcp.json`](../.mcp.json)
