@@ -53,6 +53,7 @@ from storage.response_repository import (
     received_at_of,
     request_parts,
 )
+from services.oauth_tokens import LoginHandler, TokenManager, mcp_token_store
 from services.sync_service import RequestFailure, SyncRequestService, mcp_target
 from storage.table_export import CSV_FORMAT, XLSX_SUFFIX, export_csv, export_xlsx
 
@@ -299,11 +300,14 @@ class AclResult(VerificationPayload):
 
 class McpSession:
 
-    def __init__(self, database: DatabaseManager) -> None:
+    def __init__(self, database: DatabaseManager, login: LoginHandler | None = None) -> None:
         self._database: DatabaseManager = database
         self._repository: ConfigRepository = ConfigRepository(database)
         self._responses: ResponseRepository = ResponseRepository(database)
-        self._service: SyncRequestService = SyncRequestService(self._responses)
+        self._service: SyncRequestService = SyncRequestService(
+            self._responses,
+            TokenManager(mcp_token_store(self._repository), login=login),
+        )
 
     def list_instances(self) -> list[InstancePayload]:
         with local_failures():

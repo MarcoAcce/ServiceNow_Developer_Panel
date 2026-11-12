@@ -26,12 +26,14 @@ CLOSE_LABEL: str = "Close"
 
 class FramelessDialog(QDialog):
 
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, title: str, parent: QWidget | None = None, resizable: bool = False
+    ) -> None:
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowTitle(title)
         self.setSizeGripEnabled(False)
-        self._frame: WindowFrame = WindowFrame(self, resizable=False)
+        self._frame: WindowFrame = WindowFrame(self, resizable=resizable)
         content = QWidget()
         self.content_layout: QVBoxLayout = QVBoxLayout(content)
         self.content_layout.setContentsMargins(

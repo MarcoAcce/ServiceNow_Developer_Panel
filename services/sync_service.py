@@ -1,29 +1,17 @@
 import sqlite3
 import time
-import urllib.error
 import urllib.request
-from email.message import Message
-from typing import IO
-from urllib.parse import urlsplit
+from collections.abc import Callable
 
 from configuration.config_repository import ConfigRepository, Instance
 from core.database_manager import DatabaseError
-from services.http_payload import (
-    HTTP_ERROR_STATUS,
-    REQUEST_TIMEOUT_MS,
-    error_message,
-    has_more,
-    is_paged,
-    page_overrides,
-    page_size,
-    parameter_value,
-    response_records,
-)
+from core.oauth import OAuthError
 from core.request_model import (
     COMPOSITE_STATUS_CODE,
     LIMIT_PARAMETER,
     OFFSET_PARAMETER,
     PART_ERROR_MESSAGE,
+    PreparedRequest,
     RequestResult,
     RequestSpec,
     RequestTarget,
@@ -33,12 +21,25 @@ from core.request_model import (
     prepare_request,
     section_of,
 )
+from services.http_payload import (
+    HTTP_ERROR_STATUS,
+    error_message,
+    has_more,
+    is_paged,
+    page_overrides,
+    page_size,
+    parameter_value,
+    response_records,
+)
+from services.oauth_tokens import UNAUTHORIZED_STATUS, TokenManager, is_oauth_target
+from services.sync_http import (
+    REQUEST_TIMEOUT_SECONDS,
+    HttpAnswer,
+    TransportError,
+    build_opener,
+    send,
+)
 from storage.response_repository import ResponseRepository, cached_result
-
-REQUEST_TIMEOUT_SECONDS: float = REQUEST_TIMEOUT_MS / 1000
-TIMEOUT_MESSAGE: str = "the instance did not answer within {seconds:.0f} seconds"
-CONNECTION_MESSAGE: str = "the instance could not be reached: {reason}"
-REDIRECT_MESSAGE: str = "the instance redirected the request to another address"
 
 
 class RequestFailure(Exception):
@@ -49,29 +50,12 @@ class RequestFailure(Exception):
         self.status_code: int = status_code
 
 
-class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
-
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: IO[bytes],
-        code: int,
-        msg: str,
-        headers: Message,
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        if origin_of(req.full_url) != origin_of(newurl):
-            return None
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
 class SyncRequestService:
 
-    def __init__(self, responses: ResponseRepository) -> None:
+    def __init__(self, responses: ResponseRepository, tokens: TokenManager) -> None:
         self._responses: ResponseRepository = responses
-        self._opener: urllib.request.OpenerDirector = urllib.request.build_opener(
-            SameOriginRedirectHandler
-        )
+        self._tokens: TokenManager = tokens
+        self._opener: urllib.request.OpenerDirector = build_opener()
 
     def send(self, request: RequestSpec) -> RequestResult:
         started = time.monotonic()
@@ -138,44 +122,47 @@ class SyncRequestService:
     def _fetch(
         self, request: RequestSpec, overrides: dict[str, str]
     ) -> tuple[int, list[dict[str, str]]]:
+        answer = self._answer(request, overrides)
+        if answer.status >= HTTP_ERROR_STATUS:
+            raise RequestFailure(
+                error_message(answer.payload, answer.reason, answer.status), answer.status
+            )
         try:
-            prepared = prepare_request(request, overrides)
+            return answer.status, response_records(answer.payload)
+        except ValueError as error:
+            raise RequestFailure(str(error), answer.status) from None
+
+    def _answer(self, request: RequestSpec, overrides: dict[str, str]) -> HttpAnswer:
+        target = request.target
+        authorization = self._authorization(lambda: self._tokens.authorization(target))
+        answer = self._send(self._prepared(request, overrides, authorization))
+        if answer.status != UNAUTHORIZED_STATUS or not is_oauth_target(target):
+            return answer
+        renewed = self._authorization(
+            lambda: self._tokens.renewed_authorization(target, authorization)
+        )
+        return self._send(self._prepared(request, overrides, renewed))
+
+    def _authorization(self, resolve: Callable[[], str]) -> str:
+        try:
+            return resolve()
+        except (ServiceConfigurationError, OAuthError) as error:
+            raise RequestFailure(str(error)) from None
+
+    def _prepared(
+        self, request: RequestSpec, overrides: dict[str, str], authorization: str
+    ) -> PreparedRequest:
+        try:
+            return prepare_request(request, overrides, authorization)
         except ServiceConfigurationError as error:
             raise RequestFailure(str(error)) from None
+
+    def _send(self, prepared: PreparedRequest) -> HttpAnswer:
         outgoing = urllib.request.Request(prepared.url, headers=prepared.headers)
         try:
-            with self._opener.open(outgoing, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                status = int(response.status)
-                payload = response.read()
-        except urllib.error.HTTPError as error:
-            raise failure_of(error) from None
-        except TimeoutError:
-            raise RequestFailure(TIMEOUT_MESSAGE.format(seconds=REQUEST_TIMEOUT_SECONDS)) from None
-        except urllib.error.URLError as error:
-            raise RequestFailure(CONNECTION_MESSAGE.format(reason=error.reason)) from None
-        except OSError as error:
-            raise RequestFailure(CONNECTION_MESSAGE.format(reason=error.strerror)) from None
-        if status >= HTTP_ERROR_STATUS:
-            raise RequestFailure(error_message(payload, "", status), status)
-        try:
-            return status, response_records(payload)
-        except ValueError as error:
-            raise RequestFailure(str(error), status) from None
-
-
-def failure_of(error: urllib.error.HTTPError) -> RequestFailure:
-    if error.code < HTTP_ERROR_STATUS:
-        return RequestFailure(REDIRECT_MESSAGE, error.code)
-    try:
-        payload = error.read()
-    except OSError:
-        payload = b""
-    return RequestFailure(error_message(payload, str(error.reason), error.code), error.code)
-
-
-def origin_of(url: str) -> tuple[str, str]:
-    parts = urlsplit(url)
-    return parts.scheme.lower(), parts.netloc.lower()
+            return send(self._opener, outgoing, REQUEST_TIMEOUT_SECONDS)
+        except TransportError as error:
+            raise RequestFailure(error.message, error.status_code) from None
 
 
 def elapsed_ms(started: float) -> int:

@@ -28,6 +28,13 @@ ACTIVE_AUTHENTICATION_QUERY: str = (
     "SELECT id, instance_id, authentication_type, authentication_details, active "
     "FROM {table} WHERE instance_id = ? AND active = 1"
 )
+AUTHENTICATION_BY_ID_QUERY: str = (
+    "SELECT id, instance_id, authentication_type, authentication_details, active "
+    "FROM {table} WHERE id = ?"
+)
+AUTHENTICATION_DETAILS_UPDATE: str = (
+    "UPDATE {table} SET authentication_details = ? WHERE id = ?"
+)
 AUTHENTICATION_INSERT: str = (
     "INSERT INTO {table} "
     "(instance_id, authentication_type, authentication_details, active) "
@@ -118,6 +125,22 @@ class ConfigRepository:
     def active_mcp_authentication(self, instance_id: int) -> Authentication | None:
         return self._active_authentication(MCP_AUTHENTICATION_TABLE, instance_id)
 
+    def authentication(self, authentication_id: int) -> Authentication | None:
+        return self._authentication(AUTHENTICATION_TABLE, authentication_id)
+
+    def mcp_authentication(self, authentication_id: int) -> Authentication | None:
+        return self._authentication(MCP_AUTHENTICATION_TABLE, authentication_id)
+
+    def update_authentication_details(
+        self, authentication_id: int, details: dict[str, str]
+    ) -> None:
+        self._update_details(AUTHENTICATION_TABLE, authentication_id, details)
+
+    def update_mcp_authentication_details(
+        self, authentication_id: int, details: dict[str, str]
+    ) -> None:
+        self._update_details(MCP_AUTHENTICATION_TABLE, authentication_id, details)
+
     def _list_authentications(self, table: str, instance_id: int) -> list[Authentication]:
         rows = self._database.query(AUTHENTICATION_QUERY.format(table=table), (instance_id,))
         return [self._build_authentication(row) for row in rows]
@@ -127,6 +150,25 @@ class ConfigRepository:
             ACTIVE_AUTHENTICATION_QUERY.format(table=table), (instance_id,)
         )
         return self._build_authentication(row) if row is not None else None
+
+    def _authentication(self, table: str, authentication_id: int) -> Authentication | None:
+        row = self._database.query_one(
+            AUTHENTICATION_BY_ID_QUERY.format(table=table), (authentication_id,)
+        )
+        return self._build_authentication(row) if row is not None else None
+
+    def _update_details(
+        self, table: str, authentication_id: int, details: dict[str, str]
+    ) -> None:
+        payload = encode_details(details)
+
+        def operation(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                AUTHENTICATION_DETAILS_UPDATE.format(table=table),
+                (payload, authentication_id),
+            )
+
+        self._database.write_and_wait(operation)
 
     def configuration_value(self, name: str, default: str = "") -> str:
         row = self._database.query_one(CONFIGURATION_QUERY, (name,))

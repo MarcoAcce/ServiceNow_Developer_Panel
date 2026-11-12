@@ -2,6 +2,7 @@ import os
 import sqlite3
 import sys
 import time
+from dataclasses import replace
 from functools import partial
 
 from PySide6.QtCore import QLockFile, QObject, QSize, Qt, QThreadPool, QTimer
@@ -32,17 +33,20 @@ from services.core_server import CoreServer
 from services.mcp_session import McpSession
 from services.mcp_tools import build_server
 from services.mcp_transport import serve_connection
-from ui.dialogs import ErrorDialog
+from ui.dialogs import ErrorDialog, show_error
 from ui.icons import refresh_icon_widgets
 from ui.sidebar import Sidebar
 from ui.tab import Tab
 from configuration.config_repository import (
     MINIMUM_WINDOW_HEIGHT,
     MINIMUM_WINDOW_WIDTH,
+    Authentication,
     ConfigRepository,
 )
 from configuration.config_tab import ConfigTab
+from configuration.oauth_login_dialog import OAuthLoginDialog
 from core.database_manager import DatabaseError, DatabaseManager
+from core.secret_store import SecretError
 from ui.home_tab import HomeTab
 
 from core.request_types import TABLE_DESCRIPTION, RequestType
@@ -57,8 +61,17 @@ from storage.response_repository import ResponseRepository
 from response_tabs.response_tab import ResponseTab
 from response_tabs.table_description_response_tab import TableDescriptionResponseTab
 
-from services.service import RequestCall, RequestError, RequestResult, RequestService
+from services.service import (
+    RequestCall,
+    RequestError,
+    RequestResult,
+    RequestService,
+    RequestTarget,
+)
+from services.authorized_service import AuthorizedRequestService
 from services.cached_service import CachedRequestService
+from services.login_bridge import OFFSCREEN_PLATFORM, LoginBridge, LoginTicket
+from services.oauth_tokens import TokenManager, user_token_store
 from services.dummy_service import DummyRequestService
 from services.http_service import HttpRequestService
 
@@ -73,9 +86,10 @@ USE_DUMMY_SERVICE: bool = False
 STARTUP_ERROR_TITLE: str = "ServiceNow Developer Panel not started"
 PLATFORM_VARIABLE: str = "QT_QPA_PLATFORM"
 DISPLAY_VARIABLES: tuple[str, ...] = ("DISPLAY", "WAYLAND_DISPLAY")
-OFFSCREEN_PLATFORM: str = "offscreen"
 TRAY_OPEN_LABEL: str = "Open ServiceNow Developer Panel"
 TRAY_CLIENTS_TOOLTIP: str = "{name}\nMCP clients connected: {count}"
+LOGIN_NOT_SAVED_TITLE: str = "Login not saved"
+MCP_LOGIN_REASON: str = "an AI client connected through MCP is waiting for access to {name}"
 
 
 def instance_service(parent: QWidget) -> RequestService:
@@ -97,8 +111,11 @@ class MainWindow(FramelessWindow):
         self._apply_start_size()
         self.hints: RequestHintRepository = RequestHintRepository(database)
         self.responses: ResponseRepository = ResponseRepository(database)
+        self.tokens: TokenManager = TokenManager(user_token_store(repository))
         self.service: RequestService = CachedRequestService(
-            instance_service(self), self.responses, self
+            AuthorizedRequestService(instance_service(self), self.tokens, self._log_in, self),
+            self.responses,
+            self,
         )
         self.response_context: ResponseContext = ResponseContext(
             service=self.service, responses=self.responses, hints=self.hints
@@ -230,11 +247,39 @@ class MainWindow(FramelessWindow):
         self.sidebar.refresh_icons()
         self.apply_window_theme(theme)
 
+    def refresh_configuration(self) -> None:
+        self.config_tab.reload()
+        self._on_configuration_changed()
+
     def _on_configuration_changed(self) -> None:
         self.home_tab.reload_instances()
         request_page = self._request_page
         if isinstance(request_page, RequestTab):
             request_page.reload_instances()
+
+    def _log_in(self, target: RequestTarget, reason: str) -> Authentication | None:
+        instance = target.instance
+        authentication = target.authentication
+        if instance is None or authentication is None:
+            return None
+        current = self._stored_authentication(authentication)
+        dialog = OAuthLoginDialog(instance, current.details, self, reason)
+        if dialog.exec() != OAuthLoginDialog.DialogCode.Accepted:
+            return None
+        details = dialog.details()
+        try:
+            self.repository.update_authentication_details(current.id, details)
+        except (sqlite3.Error, DatabaseError, SecretError, TimeoutError) as error:
+            show_error(self, LOGIN_NOT_SAVED_TITLE, str(error))
+        self.refresh_configuration()
+        return replace(current, details=details)
+
+    def _stored_authentication(self, authentication: Authentication) -> Authentication:
+        try:
+            stored = self.repository.authentication(authentication.id)
+        except (sqlite3.Error, DatabaseError):
+            stored = None
+        return stored if stored is not None else authentication
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -307,12 +352,14 @@ class PanelCore(QObject):
         repository: ConfigRepository,
         database: DatabaseManager,
         server: CoreServer,
+        bridge: LoginBridge,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._repository: ConfigRepository = repository
         self._database: DatabaseManager = database
         self._server: CoreServer = server
+        self._bridge: LoginBridge = bridge
         self._window: MainWindow | None = None
         self._idle_timer: QTimer = QTimer(self)
         self._idle_timer.setSingleShot(True)
@@ -323,6 +370,7 @@ class PanelCore(QObject):
         server.windowRequested.connect(self.show_window)
         server.clientsChanged.connect(self.check_idle)
         server.clientsChanged.connect(self._update_tray)
+        bridge.loginRequested.connect(self._on_login_requested)
 
     def show_window(self) -> None:
         window = self._window
@@ -340,6 +388,31 @@ class PanelCore(QObject):
         window.show()
         window.raise_()
         window.activateWindow()
+
+    def _on_login_requested(self, ticket: LoginTicket) -> None:
+        self.show_window()
+        window = self._window
+        instance = ticket.target.instance
+        authentication = ticket.target.authentication
+        if window is None or instance is None or authentication is None:
+            self._bridge.complete(ticket, None)
+            return
+        dialog = OAuthLoginDialog(
+            instance,
+            authentication.details,
+            window,
+            MCP_LOGIN_REASON.format(name=instance.name),
+        )
+        if dialog.exec() != OAuthLoginDialog.DialogCode.Accepted:
+            self._bridge.complete(ticket, None)
+            return
+        details = dialog.details()
+        try:
+            self._repository.update_mcp_authentication_details(authentication.id, details)
+        except (sqlite3.Error, DatabaseError, SecretError, TimeoutError) as error:
+            show_error(window, LOGIN_NOT_SAVED_TITLE, str(error))
+        self._bridge.complete(ticket, replace(authentication, details=details))
+        window.refresh_configuration()
 
     def check_idle(self) -> None:
         if self._is_idle():
@@ -430,6 +503,7 @@ def use_offscreen_without_display() -> None:
 
 
 def create_application() -> QApplication:
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
     app = QApplication([])
     app.setApplicationName(APPLICATION_NAME)
     app.setApplicationDisplayName(APPLICATION_NAME)
@@ -449,9 +523,10 @@ def run_core(headless: bool) -> None:
         app = create_application()
         repository = ConfigRepository(database)
         apply_theme(app, theme_of_key(repository.theme_key()))
-        mcp = build_server(McpSession(database))
+        bridge = LoginBridge()
+        mcp = build_server(McpSession(database, bridge.request_login))
         server = CoreServer(partial(serve_connection, mcp))
-        core = PanelCore(repository, database, server)
+        core = PanelCore(repository, database, server, bridge)
         server.start()
         if not headless:
             core.show_window()

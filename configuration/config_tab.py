@@ -99,6 +99,7 @@ NO_MCP_AUTHENTICATION_MESSAGE: str = (
 DELETE_MCP_AUTHENTICATION_MESSAGE: str = "Delete the {label} MCP method of {name}?"
 DATABASE_ERROR_TITLE: str = "Configuration not saved"
 DUPLICATE_INSTANCE_MESSAGE: str = "An instance named {name} already exists."
+MISSING_INSTANCE_MESSAGE: str = "The instance of this method no longer exists."
 APPEARANCE_HINT: str = (
     "The selected theme is stored in the local database and reused on the next start."
 )
@@ -761,7 +762,7 @@ class ConfigTab(Tab):
     def _on_add_authentication(
         self, instance: Instance, section: AuthenticationSection
     ) -> None:
-        dialog = AuthenticationDialog(self)
+        dialog = AuthenticationDialog(instance, self)
         if dialog.exec() != AuthenticationDialog.DialogCode.Accepted:
             return
         authentication_type, details = dialog.values()
@@ -779,7 +780,11 @@ class ConfigTab(Tab):
     def _on_edit_authentication(
         self, authentication: Authentication, section: AuthenticationSection
     ) -> None:
-        dialog = AuthenticationDialog(self, authentication)
+        instance = self._instance(authentication.instance_id)
+        if instance is None:
+            show_error(self, DATABASE_ERROR_TITLE, MISSING_INSTANCE_MESSAGE)
+            return
+        dialog = AuthenticationDialog(instance, self, authentication)
         if dialog.exec() != AuthenticationDialog.DialogCode.Accepted:
             return
         authentication_type, details = dialog.values()
@@ -885,11 +890,15 @@ class ConfigTab(Tab):
             return
         self._repository.set_active_authentication(instance_id, authentication_id, active)
 
-    def _instance_name(self, instance_id: int) -> str:
+    def _instance(self, instance_id: int) -> Instance | None:
         for instance in self._repository.list_instances():
             if instance.id == instance_id:
-                return instance.name
-        return ""
+                return instance
+        return None
+
+    def _instance_name(self, instance_id: int) -> str:
+        instance = self._instance(instance_id)
+        return instance.name if instance is not None else ""
 
     def _announce(self) -> None:
         self.reload()
