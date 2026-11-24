@@ -1,6 +1,6 @@
 [![Download for Windows](https://img.shields.io/badge/Download-Windows-blue?logo=data:image%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTEgNC41IDEwIDN2OEgxem0xMC0xLjdMMjMgMXYxMGgtMTJ6TTEgMTNoOXY4TDEgMTkuNXptMTAgMGgxMnYxMC4ybC0xMi0xLjd6Ii8%2BPC9zdmc%2B)](https://github.com/MarcoAcce/ServiceNow_Developer_Panel/releases/latest/download/ServiceNowDeveloperPanelSetup.exe)
 [![Download for Linux](https://img.shields.io/badge/Download-Linux-yellow?logo=linux)](https://github.com/MarcoAcce/ServiceNow_Developer_Panel/releases/latest/download/ServiceNowDeveloperPanelSetup-linux-x86_64.tar.gz)
-
+[![MarcoAcce/ServiceNow_Developer_Panel MCP server](https://glama.ai/mcp/servers/MarcoAcce/ServiceNow_Developer_Panel/badges/score.svg)](https://glama.ai/mcp/servers/MarcoAcce/ServiceNow_Developer_Panel)
 # What is this project
 
 This project is meant as a helper tool for service now developer.
